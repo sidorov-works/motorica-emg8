@@ -13,8 +13,9 @@ from sklearn.base import BaseEstimator, TransformerMixin
 
 # Модели, валидация, метрики
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import cross_val_score
-from sklearn.metrics import classification_report
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.model_selection import cross_val_score, StratifiedGroupKFold
+from sklearn.metrics import f1_score
 
 # Подбор гиперпараметров
 import optuna
@@ -36,6 +37,7 @@ OMG_COL_PRFX = 'omg'  # префикс в названиях столбцов д
 STATE_COL = 'state'   # столбец с названием жеста, соответствующего команде
 CMD_COL = 'id'        # столбец с меткой команды на выполнение жеста
 TS_COL = 'ts'         # столбец метки времени
+N_GESTS_IN_CYCLE = 14 # количество жестов в цикле протокола (включая нейтральные)
 
 NOGO_STATE = 'Neutral'      # статус, обозначающий нейтральный жест
 BASELINE_STATE = 'Baseline' # доп. служебный статус в начале монтажа
@@ -44,8 +46,11 @@ FINISH_STATE   = 'Finish'   # доп. служебный статус в кон�
 # Список с названиями всех столбцов OMG
 OMG_CH = [OMG_COL_PRFX + str(i) for i in range(N_OMG_CH)]
 
-SYNC_COL = 'sample'   # новый столбец - порядковый номер размеченного жеста
-TARGET = 'act_label'  # новый столбец - таргет (метка фактически выполняемого жеста)
+# Новые столбцы:
+SYNC_COL = 'sample'   # порядковый номер размеченного жеста
+GROUP_COL = 'group'   # новый группы (цикла протокола)
+TARGET = 'act_label'  # таргет (метка фактически выполняемого жеста)
+
 
 
 # ----------------------------------------------------------------------------------------------
@@ -336,10 +341,11 @@ def read_emg8(
         state_col: str = STATE_COL,
         ts_col: str = TS_COL,
         sync_col_name: str = SYNC_COL,
+        group_col_name: str = GROUP_COL,
+        n_gests_in_group: int = N_GESTS_IN_CYCLE,
         states_to_drop: list = [BASELINE_STATE, FINISH_STATE],
-        mark_up: bool = True,
         target_col_name: str = TARGET,
-        last_train_idx: int = -1
+        n_holdput_groups: int = 0
         ) -> List[pd.DataFrame | pd.Series | None]:
     '''
     Осуществляет чтение файла с данными измерений монтажа .emg8.
@@ -374,7 +380,7 @@ def read_emg8(
 
     **target_col_name**: *str, default=TARGET*
 
-    **last_train_idx**: *int, default=-1*
+    **n_holdput_groups**: *int, default=0*
 
     ### Возвращаемый результат
 
@@ -399,39 +405,63 @@ def read_emg8(
     # Далее работаем только с необходимыми столбцами
     data = data_origin.copy()[cols]
     
+    # Добавим признак порядкового номера эпох (требуется для алгоритма разметки)
     bounds = data[data[cmd_col] != data[cmd_col].shift(1)].index
-
     for i, lr in enumerate(zip(bounds, np.append(bounds[1:], [data.index[-1]]))):
         l, r = lr # l, r - индексы начала текущей и следующей эпох соответственно
         data.loc[l: r - 1, sync_col_name] = i
 
-    if mark_up:
-        marker = BasePeakMarker(
-            sync_col=sync_col_name, 
-            cmd_col=cmd_col, 
-            ts_col=ts_col, 
-            omg_cols=feature_cols,
-            target_col_name=target_col_name
-        )
-        data = marker.fit_transform(data)
+    # Выполним разметку жестов
+    marker = BasePeakMarker(
+        sync_col=sync_col_name, 
+        cmd_col=cmd_col, 
+        ts_col=ts_col, 
+        omg_cols=feature_cols,
+        target_col_name=target_col_name
+    )
+    data = marker.fit_transform(data)
+
+    # Перепишем признак sync_col (порядковый номер жеста в монтаже), 
+    # чтобы он соответствовал разметке по фактическим границам
+    bounds = data[data[target_col_name] != data[target_col_name].shift(1)].index
+    for i, lr in enumerate(zip(bounds, np.append(bounds[1:], [data.index[-1]]))):
+        l, r = lr # l, r - индексы начала текущей и следующей эпох соответственно
+        data.loc[l: r - 1, sync_col_name] = i
+
+    # Теперь проставим номера групп (циклов протокола) – понадобится при кросс-валидации
+    group_idx = list(data[[target_col_name, sync_col_name]].drop_duplicates().index[::n_gests_in_group])
+    # [последний индекс "дотянем" до конца]
+    group_idx[-1] = data.index[-1] + 1
+    for i, lr in enumerate(zip(group_idx, group_idx[1:])):
+        l, r = lr
+        data.loc[l: r - 1, group_col_name] = i
+    n_groups = i
+
 
     X = data[feature_cols].copy()
-    y = data[target_col_name if mark_up else cmd_col].copy()
+    y = data[target_col_name].copy()
 
-    if data.index[0] <= last_train_idx < data.index[-1]:
+    if n_holdput_groups > 0:
+        if n_holdput_groups >= n_groups:
+            raise ValueError(f"Количество отложенных групп n_holdput_groups={n_holdput_groups} должно быть меньше общего количества групп {n_groups + 1}")
+        last_train_idx = group_idx[-n_holdput_groups - 1] - 1
         X_train = X.loc[: last_train_idx, :].to_numpy()
         X_test = X.loc[last_train_idx + 1: , :].to_numpy()
         y_train = y.loc[: last_train_idx].to_numpy()
         y_test = y.loc[last_train_idx + 1: ].to_numpy()
+        train_groups = data.loc[: last_train_idx, group_col_name].to_numpy()
     else:
         X_train = X.to_numpy()
         X_test = None
         y_train = y.to_numpy()
         y_test = None
+        train_groups = data[group_col_name].to_numpy()
 
-    data_origin[TARGET] = data[TARGET]
+    data_origin[target_col_name] = data[target_col_name]
+    data_origin[sync_col_name] = data[sync_col_name]
+    data_origin[group_col_name] = data[group_col_name]
 
-    return X_train, X_test, y_train, y_test, data_origin
+    return X_train, X_test, y_train, y_test, data_origin, train_groups
 
 
 # ----------------------------------------------------------------------------------------------
@@ -447,6 +477,8 @@ class BaseSlidingProc(BaseEstimator, TransformerMixin):
         ):
         self.n_lags = n_lags
         self.oper = oper
+
+        self.i = 0
 
     # По умолчанию для всех дочерних классов считаем, 
     # что их работа не вносит задержку при работе в реальном времени.
@@ -481,6 +513,8 @@ class BaseSlidingProc(BaseEstimator, TransformerMixin):
         # Если наш объект получает данные впервые,
         if self.X_que.shape[0] == 0:
             # накопируем первый пример нужное число раз
+            #self.X_que = np.tile(X[0], (self.n_lags - 1, 1)) # !!!!!!!!!!!!!!!!!
+            self.i += 1
             self.X_que = np.tile(X[0], (self.n_lags - 1, 1))
 
         self.X_que = np.vstack((self.X_que, X))
@@ -650,7 +684,7 @@ class PostprocWrapper(BaseEstimator, TransformerMixin):
 # ----------------------------------------------------------------------------------------------
 # ПАЙПЛАЙНЫ
 
-MAX_TOTAL_SHIFT = 7
+MAX_TOTAL_SHIFT = 8
 
 from sklearn.pipeline import Pipeline
 
@@ -665,10 +699,10 @@ def get_total_shift(pipeline: Pipeline):
             continue
     return total_shift
 
-
-def create_logreg_pipeline(
-        optimize_and_fit: bool = False, 
-        X=None, y=None,
+# Пайплайн на базе логистической регрессии
+def create_logreg_pipeline( 
+        X, y, groups=None,
+        optimize_and_fit: bool = False,
         max_total_shift: int = MAX_TOTAL_SHIFT,
         n_trials: int = 100
     ):
@@ -680,14 +714,14 @@ def create_logreg_pipeline(
         ('model', PostprocWrapper(estimator=LogisticRegression(C=10, max_iter=5000)))
     ])
 
-    def opt_func(trial: optuna.Trial, X=X, y=y, pl=pl, max_total_shift=max_total_shift):
+    def opt_func(trial: optuna.Trial, X=X, y=y, groups=groups, pl=pl, max_total_shift=max_total_shift):
 
         params = {
-            'noise_reduct__n_lags': trial.suggest_int('noise_reduct__n_lags', 1, 5),
-            'add_diff__n_lags':     trial.suggest_int('add_diff__n_lags', 1, 7),
+            'noise_reduct__n_lags': trial.suggest_int('noise_reduct__n_lags', 1, 7),
+            'add_diff__n_lags':     trial.suggest_int('add_diff__n_lags', 2, 7),
             'add_diff__avg':        trial.suggest_categorical('add_diff__avg', ['mean', 'median']),
             'model__n_lags':        trial.suggest_int('model__n_lags', 3, 7, step=2),
-            'model__C':             trial.suggest_int('model__C', 1, 500, log=True)
+            'model__C':             trial.suggest_int('model__C', 1, 50, log=True)
         }
         pl.set_params(**params)
 
@@ -699,7 +733,26 @@ def create_logreg_pipeline(
             total_shift = min(total_shift, max_total_shift)
             y_shifted = np.hstack((np.tile(y[0], total_shift), y[: -total_shift]))
 
-        return cross_val_score(pl, X, y_shifted, scoring='f1_macro').mean()
+        # Если переданы группы, то будем проводить кросс-валидацию 
+        # с помощью StratifiedGroupKFold
+        if not groups is None:
+            n_groups = int(np.max(groups) + 1)
+            kf = StratifiedGroupKFold(n_groups)
+            scores = []
+            for index_train, index_valid in kf.split(X, y, groups=groups):
+                X_train = X[index_train]
+                y_train = y_shifted[index_train]
+                X_valid = X[index_valid]
+                y_valid = y_shifted[index_valid]
+                pl.fit(X_train, y_train)
+                y_pred = pl.predict(X_valid)
+                scores.append(f1_score(y_valid, y_pred, average='macro'))
+            return np.mean(scores)
+        # Если же группы не переданы, то используем 
+        # обычную кроссвалидацию без перемешивания
+        else: # (groups is None)
+            return cross_val_score(pl, X, y_shifted, scoring='f1_macro').mean()
+
     
     if optimize_and_fit:
         study = optuna.create_study(direction='maximize')
