@@ -5,7 +5,7 @@ from numpy.lib.stride_tricks import sliding_window_view
 import scipy.stats as stats
 
 # Преобразование признаков
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler
 
 # Пайплайнs
 from sklearn.pipeline import Pipeline
@@ -345,7 +345,7 @@ def read_emg8(
         n_gests_in_group: int = N_GESTS_IN_CYCLE,
         states_to_drop: list = [BASELINE_STATE, FINISH_STATE],
         target_col_name: str = TARGET,
-        n_holdput_groups: int = 0
+        n_holdout_groups: int = 0
         ) -> List[pd.DataFrame | pd.Series | None]:
     '''
     Осуществляет чтение файла с данными измерений монтажа .emg8.
@@ -441,10 +441,10 @@ def read_emg8(
     X = data[feature_cols].copy()
     y = data[target_col_name].copy()
 
-    if n_holdput_groups > 0:
-        if n_holdput_groups >= n_groups:
-            raise ValueError(f"Количество отложенных групп n_holdput_groups={n_holdput_groups} должно быть меньше общего количества групп {n_groups + 1}")
-        last_train_idx = group_idx[-n_holdput_groups - 1] - 1
+    if n_holdout_groups > 0:
+        if n_holdout_groups >= n_groups:
+            raise ValueError(f"Количество отложенных групп n_holdput_groups={n_holdout_groups} должно быть меньше общего количества групп {n_groups + 1}")
+        last_train_idx = group_idx[-n_holdout_groups - 1] - 1
         X_train = X.loc[: last_train_idx, :].to_numpy()
         X_test = X.loc[last_train_idx + 1: , :].to_numpy()
         y_train = y.loc[: last_train_idx].to_numpy()
@@ -467,6 +467,20 @@ def read_emg8(
 # ----------------------------------------------------------------------------------------------
 # ПРЕОБРАЗОВАНИЕ И СОЗДАНИЕ ПРИЗНАКОВ
 
+# Самый первый обработчик: переводит одномерный вектор признаков (когда нужно 
+# предсказать один пример) в двумерный массив
+
+class FixOneDimSample(BaseEstimator, TransformerMixin):
+
+    def fit(self, X, y=None):
+        return self
+    
+    def transform(self, X):
+        X = np.array(X)
+        if X.ndim == 1:
+            X = X.reshape((1, -1))
+        return X
+
 # Базовый класс для преобразования данных с помощью скользящего окна
 class BaseSlidingProc(BaseEstimator, TransformerMixin):
 
@@ -477,8 +491,6 @@ class BaseSlidingProc(BaseEstimator, TransformerMixin):
         ):
         self.n_lags = n_lags
         self.oper = oper
-
-        self.i = 0
 
     # По умолчанию для всех дочерних классов считаем, 
     # что их работа не вносит задержку при работе в реальном времени.
@@ -493,7 +505,7 @@ class BaseSlidingProc(BaseEstimator, TransformerMixin):
 
     # В дочерних классах данных внутренний метод 
     # должен реализовавыть фактическую обработку
-    def _proc_func(self, X_sld, X_org):
+    def _proc_func(self, X_sld, X):
         # В качестве заглушки просто возвращаем последний (текущий) пример
         return X_sld[:, -1]
     
@@ -507,14 +519,12 @@ class BaseSlidingProc(BaseEstimator, TransformerMixin):
 
         # Если хотят предсказать один пример, 
         # все равно переводим его в двумерный массив
-        if X.ndim == 1:
-            X = X.reshape((1, self.n_ftr))
+        #if X.ndim == 1:
+            #X = X.reshape((1, self.n_ftr))
         
         # Если наш объект получает данные впервые,
         if self.X_que.shape[0] == 0:
             # накопируем первый пример нужное число раз
-            #self.X_que = np.tile(X[0], (self.n_lags - 1, 1)) # !!!!!!!!!!!!!!!!!
-            self.i += 1
             self.X_que = np.tile(X[0], (self.n_lags - 1, 1))
 
         self.X_que = np.vstack((self.X_que, X))
@@ -528,7 +538,7 @@ class BaseSlidingProc(BaseEstimator, TransformerMixin):
         if self.oper == 'add':
             # добавляем новый признак к основному набору
             X_res = np.hstack((X, X_proc))
-        else: # self.oper == 'replace'
+        else: # (self.oper == 'replace')
             # либо заменяем исходные признаки новыми значениями
             X_res = X_proc
 
@@ -541,7 +551,6 @@ class BaseSlidingProc(BaseEstimator, TransformerMixin):
     # нам нельзя вносить задержку во временные ряды
     def fit_transform(self, X, y=None):
         self.fit(X)
-        self.X_que = np.empty((0, self.n_ftr))
         X_proc = self.transform(X)
         self.X_que = np.empty((0, self.n_ftr))
         shift = self.get_realtime_shift()
@@ -581,10 +590,12 @@ class AddDifference(BaseSlidingProc):
     def __init__(
             self,
             n_lags: int = 3,
-            avg: str = 'mean' # 'median'
+            avg: str = 'mean', # 'median'
+            n_features: int = N_OMG_CH
         ):
         super().__init__(n_lags=n_lags, oper='add')
         self.avg = avg
+        self.n_features = n_features
 
 
     def _proc_func(self, X_sld, X):
@@ -593,9 +604,36 @@ class AddDifference(BaseSlidingProc):
             'mean': np.mean,
             'median': np.median
             }[self.avg]
-        X_prev_avg = np_avg_func(X_sld[:, :-1], axis=(1,))
+        X_prev_avg = np_avg_func(X_sld[:, :-1, :self.n_features], axis=(1,))
         # Результат – разность признаков и их средних предыдущих значений
-        return X - X_prev_avg
+        return X[:, :self.n_features] - X_prev_avg
+    
+
+
+class AvgDiff(BaseEstimator, TransformerMixin):
+
+    def __init__(self, scaler=None, avg='mean'):
+        self.scaler = scaler
+        self.avg = avg
+
+
+    def fit(self, X, y=None):
+        if not self.scaler is None:
+            self.scaler.fit(X)
+        return self
+    
+    
+    def transform(self, X):
+        if not self.scaler is None:
+            X = self.scaler.transform(X)
+        else:
+            X = np.array(X)
+        np_func = {
+            'mean': np.mean,
+            'median': np.median
+        }[self.avg]
+        X_avg = np_func(X, axis=1).reshape((-1, 1))
+        return np.hstack([X, X - X_avg])
     
 
 # ----------------------------------------------------------------------------------------------
@@ -708,7 +746,9 @@ def create_logreg_pipeline(
     ):
 
     pl = Pipeline([
+        ('fix_1dim_sample', FixOneDimSample()),
         ('noise_reduct', NoiseReduction()),
+        #('average_diff', AvgDiff(scaler=RobustScaler())),
         ('add_diff', AddDifference()),
         ('scaler', MinMaxScaler()),
         ('model', PostprocWrapper(estimator=LogisticRegression(C=10, max_iter=5000)))
@@ -718,9 +758,14 @@ def create_logreg_pipeline(
 
         params = {
             'noise_reduct__n_lags': trial.suggest_int('noise_reduct__n_lags', 1, 7),
+
+            #'average_diff__avg':        trial.suggest_categorical('average_diff__avg', ['mean', 'median']),
+
             'add_diff__n_lags':     trial.suggest_int('add_diff__n_lags', 2, 7),
             'add_diff__avg':        trial.suggest_categorical('add_diff__avg', ['mean', 'median']),
+
             'model__n_lags':        trial.suggest_int('model__n_lags', 3, 7, step=2),
+
             'model__C':             trial.suggest_int('model__C', 1, 50, log=True)
         }
         pl.set_params(**params)

@@ -17,7 +17,7 @@ def fig_montage(
         **extra_labels
         ):
 
-    fig_data = fig_data.copy()
+    fig_data = pd.DataFrame(fig_data)
 
     for extra_label in extra_labels:
         fig_data[extra_label] = extra_labels[extra_label] * mult_labels
