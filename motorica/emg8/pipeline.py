@@ -747,9 +747,9 @@ def create_logreg_pipeline(
 
     pl = Pipeline([
         ('fix_1dim_sample', FixOneDimSample()),
-        ('noise_reduct', NoiseReduction()),
+        ('noise_reduct', NoiseReduction(3)),
         #('average_diff', AvgDiff(scaler=RobustScaler())),
-        ('add_diff', AddDifference()),
+        ('add_diff', AddDifference(5)),
         ('scaler', MinMaxScaler()),
         ('model', PostprocWrapper(estimator=LogisticRegression(C=10, max_iter=5000)))
     ])
@@ -803,6 +803,6 @@ def create_logreg_pipeline(
         study = optuna.create_study(direction='maximize')
         study.optimize(opt_func, n_trials=n_trials, show_progress_bar=True)
         pl.set_params(**study.best_params)
-        pl.fit(X, y)
+    pl.fit(X, y)
     
     return pl
