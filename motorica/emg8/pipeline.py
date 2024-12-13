@@ -7,14 +7,13 @@ import scipy.stats as stats
 # Преобразование признаков
 from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler
 
-# Пайплайнs
+# Пайплайны
 from sklearn.pipeline import Pipeline
 from sklearn.base import BaseEstimator, TransformerMixin
 
 # Модели, валидация, метрики
 from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import GradientBoostingClassifier
-from sklearn.model_selection import cross_val_score, StratifiedGroupKFold
+from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.metrics import f1_score
 
 # Подбор гиперпараметров
@@ -26,317 +25,40 @@ import os
 # Для аннотаций
 from typing import List, Any
 
+from motorica.emg8.constants import *
+
+from motorica.emg8.markers import *
+
 
 # ----------------------------------------------------------------------------------------------
 # ПАРАМЕТРЫ ЧТЕНИЯ ИСХОДНЫХ ДАННЫХ И РАЗМЕТКИ
 
-DATA_DIR = 'data/new'
+# DATA_DIR = 'data/new'
 
-N_OMG_CH = 16         # количество каналов OMG-датчиков
-OMG_COL_PRFX = 'omg'  # префикс в названиях столбцов датафрейма, соответствующих OMG-датчикам
-STATE_COL = 'state'   # столбец с названием жеста, соответствующего команде
-CMD_COL = 'id'        # столбец с меткой команды на выполнение жеста
-TS_COL = 'ts'         # столбец метки времени
-N_GESTS_IN_CYCLE = 14 # количество жестов в цикле протокола (включая нейтральные)
+# N_OMG_CH = 16         # количество каналов OMG-датчиков
+# OMG_COL_PRFX = 'omg'  # префикс в названиях столбцов датафрейма, соответствующих OMG-датчикам
+# STATE_COL = 'state'   # столбец с названием жеста, соответствующего команде
+# CMD_COL = 'id'        # столбец с меткой команды на выполнение жеста
+# TS_COL = 'ts'         # столбец метки времени
+# N_GESTS_IN_CYCLE = 14 # количество жестов в цикле протокола (включая нейтральные)
 
-NOGO_STATE = 'Neutral'      # статус, обозначающий нейтральный жест
-BASELINE_STATE = 'Baseline' # доп. служебный статус в начале монтажа
-FINISH_STATE   = 'Finish'   # доп. служебный статус в конце монтажа
+# NOGO_STATE = 'Neutral'      # статус, обозначающий нейтральный жест
+# BASELINE_STATE = 'Baseline' # доп. служебный статус в начале монтажа
+# FINISH_STATE   = 'Finish'   # доп. служебный статус в конце монтажа
 
-# Список с названиями всех столбцов OMG
-OMG_CH = [OMG_COL_PRFX + str(i) for i in range(N_OMG_CH)]
+# # Список с названиями всех столбцов OMG
+# OMG_CH = [OMG_COL_PRFX + str(i) for i in range(N_OMG_CH)]
 
-# Новые столбцы:
-SYNC_COL = 'sample'   # порядковый номер размеченного жеста
-GROUP_COL = 'group'   # новый группы (цикла протокола)
-TARGET = 'act_label'  # таргет (метка фактически выполняемого жеста)
+# # Новые столбцы:
+# SYNC_COL = 'sample'   # порядковый номер размеченного жеста
+# GROUP_COL = 'group'   # новый группы (цикла протокола)
+# TARGET = 'act_label'  # таргет (метка фактически выполняемого жеста)
 
 
 
 # ----------------------------------------------------------------------------------------------
-# РАЗМЕТКА НА ФАКТИЧЕСКИЕ ЖЕСТЫ
-
-class BasePeakMarker(BaseEstimator, TransformerMixin):
-
-    '''
-    Класс-преобразователь для добавления в данные признака `"act_label"` – метки фактически выполняемого жеста.
-
-    ### Параметры объекта класса
-    
-    **sync_col**: *str, default=SYNC_COL*<br>
-    Найзвание столбца с порядковым номером жеста (в соответствии с поступившей командой)
-
-    **label_col**: *str, default=LABEL_COL*<br>
-    Название столбца с меткой жеста (в соответствии с поступившей командой)
-
-    **ts_col**: *str, default=TS_COL*<br>
-    Название столбца с меткой времени
-
-    **omg_cols**
-
-    **target_col_name**
-
-    **hi_val_threshold**: *float, default=0.1*<br>
-    Нижний порог медианы показаний датчика (в нормализованных измерениях) 
-    для отнесения его к числу *активных* датчиков
-    
-    **sudden_drop_threshold**: *float, default=0.1*<br>
-    Верхний порог отношения первого процентиля к медиане показаний датчика 
-    для отнесения его к числу датчиков, которым свойственны внезапные резкие падения сигнала 
-    до околонулевых значений (такие датчики игнорируются при выполнении разметки)
-
-    **sync_shift**: *int, default=0*<br>
-    Общий сдвиг меток синхронизации (признак `sync_col`)
-
-    **bounds_shift_extra**: *int, default=0*<br>
-    Корректировка (сдвиг) найденных границ
-
-    **clean_w**: *int, default=5*<br>
-    Параметр используемый при очистке найденных максимумов (пиков): 
-    если два или более пиков находятся на расстоянии не более `clean_w` измерений друг от друга, 
-    то из них оставляем один самый высокий пик
-
-    **use_grad2**: *bool, default=True*<br>
-    Если True - алгоитм разметки использует локальные максимумы (пики) суммарного второго градиента 
-    показаний датчиков. Иначе - используется градиент суммарного стандартного отклонения
-
-    ## Методы
-    Данный класс реализует стандартые методы классов-преобразователей *scikit-learn*:
-
-    `fit()`, `fit_transform()` и `transform()` и может быть использован как элемент пайплайна.
-    '''
-
-    def __init__(
-            self,
-            sync_col: str = SYNC_COL,
-            cmd_col: str = CMD_COL,
-            state_col: str = STATE_COL,
-            nogo_state: str = NOGO_STATE,
-            ts_col: str = TS_COL,
-            omg_cols: str =  OMG_CH,
-            target_col_name: str = TARGET,
-            hi_val_threshold: float = 0.1,
-            sudden_drop_threshold: float = 0.1,
-            sync_shift: int = 0,
-            bounds_shift_extra: int = 0,
-            clean_w: int = 5,
-            use_grad2: bool = True
-        ):
-        self.sync_col = sync_col
-        self.cmd_col = cmd_col
-        self.state_col = state_col
-        self.nogo_state = nogo_state
-        self.ts_col = ts_col
-        self.omg_cols = omg_cols
-        self.target_col_name = target_col_name
-        self.hi_val_threshold = hi_val_threshold
-        self.sudden_drop_threshold = sudden_drop_threshold
-        self.sync_shift = sync_shift
-        self.clean_w = clean_w
-        self.use_grad2 = use_grad2
-        self.bounds_shift = (-2 if self.use_grad2 else 3) + bounds_shift_extra
-
-
-    # Внутренний метод для нахождения "пиков" (второго градиента, градиента станд. отклонения)
-    def _find_peaks(
-        self,
-        X: np.ndarray,
-        window: int,
-        spacing: int,
-    ):
-        def _peaks(arr):
-            mask = np.hstack([
-                [False],
-                (arr[: -2] < arr[1: -1]) & (arr[2:] < arr[1: -1]),
-                [False]
-            ])
-            peaks = arr.copy()
-            peaks[~mask] = 0
-            peaks[peaks < 0] = 0
-            return peaks
+# ПОДГРУЗКА И РАЗМЕТКА
         
-        def _clean_peaks(arr, w=self.clean_w):
-            peaks = arr.copy()
-            # Разберемся с пиками, расположенными близко друг к другу: 
-            # из нескольких пиков, помещающихся в окне w, 
-            # оставим только один - максимальный
-            for i in range(peaks.shape[0] - w + 1):
-                slice = peaks[i: i + w]
-                max_peak = np.max(slice)
-                mask = slice != max_peak
-                peaks[i: i + w][mask] = 0
-            return peaks
-
-        # 1) Градиенты векторов показаний датчиков
-        grad1 = np.sum(np.abs(np.gradient(X, spacing, axis=0)), axis=1)
-        # не забудем заполнить образовавшиеся "дырки" из NaN
-        grad1 = np.nan_to_num(grad1)
-
-        grad2 = np.gradient(grad1, spacing, axis=0)
-        grad2 = np.nan_to_num(grad2)
-        peaks2 = _peaks(grad2)
-
-        # 2) Среднее стандартное отклонение и его градиент
-        std = np.mean(pd.DataFrame(X).rolling(window, center=True).std(), axis=1)
-        std = np.nan_to_num(std)
-
-        std1 = np.gradient(std, 1, axis=0)
-        std1 = np.nan_to_num(std1)
-        peaks_std1 = _peaks(std1)
-
-        # Возвращяем пики градиента стандартного отклонения и второго градиента
-        return _clean_peaks(peaks_std1), _clean_peaks(peaks2)
-
-    # Функция для непосредственной разметки  
-    def _mark(
-        self,
-        X: pd.DataFrame
-    ) -> np.ndarray[int]:
-        
-        # Сохраним исходные индексы и сбросим на время разметки
-        origin_index = X.index
-        X = X.reset_index(drop=True)
-        
-        # Сглаживание
-        X_omg = pd.DataFrame(X[self.mark_sensors]).rolling(self.window, center=True).median()
-        # Приведение к единому масштабу
-        X_omg = MinMaxScaler((1, 1000)).fit_transform(X_omg)
-
-        peaks_std1, peaks_grad2 = self._find_peaks(
-            X_omg,
-            window=self.window,
-            spacing=self.spacing
-        )
-
-        # Сохраним найденные пики в соответствующие атрибуты объекта 
-        # (могут пригодиться для последующего анализа результатов разметки)
-        self.peaks_std1 = peaks_std1
-        self.peaks_grad2 = peaks_grad2
-
-        peaks = peaks_grad2 if self.use_grad2 else peaks_std1
-
-        sync = X[self.sync_col].copy()
-       
-        # Сдвигаем синхронизацию
-        if self.sync_shift > 0:
-            sync_0 = sync.iloc[0]
-            sync.iloc[self.sync_shift: ] = sync.iloc[: -self.sync_shift]
-            sync.iloc[: self.sync_shift] = sync_0
-        
-        # Искать максимальные пики будем внутри отрезков, 
-        # определяемых по признаку синхронизации
-        sync_mask = sync != sync.shift(-1)
-        sync_index = np.append([X.index[0]], X[sync_mask].index)
-
-        labels = [int(X.loc[idx + 1, self.cmd_col]) for idx in sync_index[:-1]]
-
-        bounds = np.array([])
-
-        for l, r in zip(sync_index, sync_index[1:]):
-            bounds = np.append(bounds, np.argmax(peaks[l: r]) + l)
-
-        bounds += self.bounds_shift
-
-        X_mrk = X.copy()
-
-        # Теперь разметим каждое измерение в наборе фактическими метками
-        X_mrk[self.target_col_name] = labels[0]
-        for i, lr in enumerate(zip(bounds, np.append(bounds[1:], X_mrk.index[-1]))):
-            l, r = lr
-            # l, r - индексы начала текущего и следующего жестов соответственно
-            X_mrk.loc[l: r, self.target_col_name] = labels[i]      
-
-        X_mrk.index = origin_index
-
-        return X_mrk
-
-
-    def fit(self, X: pd.DataFrame, y=None):
-        
-        # 1. Определим параметры монтажа:
-
-        grouped = X[X[self.state_col] != self.nogo_state].groupby(self.sync_col)
-        # - периодичность измерений – разность между соседними метками времени
-        ts_delta = np.median((X[self.ts_col].shift(-1) - X[self.ts_col]).value_counts().index)
-
-        # - среднее кол-во измерений на один (не нейтральный) жест
-        self.ticks_per_gest = int(
-            grouped[self.ts_col].count().median()
-        )
-
-        # - среднее кол-во измерений на один разделительный нейтральный жест
-        self.ticks_per_nogo = int(
-            ((grouped[self.ts_col].first() - grouped[self.ts_col].first().shift(1)) / ts_delta).median() - self.ticks_per_gest
-        )
-
-        # 2. Определим датчики с высоким уровнем сигнала
-
-        omg_medians = pd.DataFrame(
-            MinMaxScaler().fit_transform(pd.DataFrame(X[self.omg_cols].median(axis=0))),
-            index=self.omg_cols, columns=['omg']
-        )
-        self.hi_val_sensors = omg_medians[omg_medians['omg'] > self.hi_val_threshold].index.to_list()
-
-
-        # 3. Исключим датчики с внезапными падениями сигнала 
-        # (используем для этого заданный порог отношения первого процентиля к медиане)
-
-        # По каждому из активных датчиков посчитаем отношение первого процентиля к медиане 
-        q_to_med = pd.Series(
-            X[self.hi_val_sensors].quantile(0.01) / X[self.hi_val_sensors].median(),
-            index=self.hi_val_sensors
-        )
-        # Отфильтруем датчики по заданному порогу self.sudden_drop_threshold
-        sudden_drop_sensors = q_to_med[q_to_med <= self.sudden_drop_threshold].index
-        self.mark_sensors = [sensor for sensor in self.hi_val_sensors if sensor not in sudden_drop_sensors]
-
-
-        # 4. Исключим датчики с перегрузкой
-
-        # Сколько идущих подряд максимальных значений считать перегрузкой
-        in_a_row_threshold = 5
-        # Доля перегруженного сигнала, чтобы исключить датчик из определения границ
-        clip_threshold = 0.05
-
-        clip_sensors = []
-
-        # Для каждого из рассматриваемых датчиков найдем его максимум
-        for sensor in self.mark_sensors:
-            mask = X[sensor] == X[sensor].max()
-            in_a_row = []
-            cur = 0
-            for x in mask:
-                if not x:
-                    if cur >= in_a_row_threshold:
-                        in_a_row.append(cur)
-                    cur = 0
-                else:
-                    cur += 1
-            if cur  >= in_a_row_threshold:
-                in_a_row.append(cur)
-            if sum(in_a_row) / X.shape[0] > clip_threshold:
-                clip_sensors.append(sensor)
-
-        if len(clip_sensors):
-            self.mark_sensors = [sensor for sensor in self.mark_sensors if sensor not in clip_sensors]
-
-
-        # Теперь у нас готов список датчиков self.mark_sensors, по которым мы и будем определять границы жестов
-
-        # Установим ширину окна (для сглаживания медианой)
-        self.window = self.ticks_per_gest // 4
-        # и параметр spacing для вычисления градиентов
-        self.spacing = self.ticks_per_gest // 4
-
-        return self
-    
-    def transform(self, X):
-        if self.cmd_col in X.columns:
-            return self._mark(X)
-        else:
-            return X.copy()
-        
-
 def read_emg8(
         montage: str, 
         dir: str = DATA_DIR, 
@@ -347,33 +69,34 @@ def read_emg8(
         ts_col: str = TS_COL,
         sync_col_name: str = SYNC_COL,
         group_col_name: str = GROUP_COL,
-        # n_gests_in_group: int = N_GESTS_IN_CYCLE,
         states_to_drop: list = [BASELINE_STATE, FINISH_STATE],
         marker = BasePeakMarker(),
         target_col_name: str = TARGET,
         n_holdout_groups: int = 0
         ) -> List:
-    '''
+    """
     Осуществляет чтение файла с данными измерений монтажа .emg8.
 
     Перенумеровывает классы жестов в порядке их следования по протоколу монтажа.
 
-    Добавляет в возвращаемый датафрейм признак `sample`, представляющий собой порядковый номер жеста в монтаже.
+    Добавляет в возвращаемый датафрейм признак `sync_col_name`, представляющий собой порядковый номер жеста в монтаже.
 
+    Находит циклы протокола и маркирует их признаком `group_col_name`
     ### Параметры
 
-    **montage**: *str*<br>
-    Имя файла для чтения
+    montage : str
+        имя файла для чтения
 
-    **dir**: *str, default="data"*<br>
-    Название папки, в которой находится файл
+    dir : str, default="data"
+        название папки, в которой находится файл
 
-    **sep**: *str, default=' '*<br>
-    Символ-разделитель в csv-файле
+    sep :  str, default=' '
+        символ-разделитель в исходном файле
 
-    **feature_cols**: *List[str], default=OMG_COLS*
+    feature_cols: List[str], default=OMG_COLS
+        список названий столбцов, которые будут использоваться в качестве признаков
 
-    **cmd_col**: *str, default=CMD_COL*
+    cmd_col : str, default=CMD_COL
 
     **ts_col**: *str, default=TS_COL*
 
@@ -391,9 +114,9 @@ def read_emg8(
     ### Возвращаемый результат
 
     Список: **X_train**, **X_test** | None, **y_train**, **y_train** | None, **data**
-    '''
+    """
+
     path = os.path.join(dir, montage)
-    cols = feature_cols + [cmd_col, state_col, ts_col]
 
     data_origin = pd.read_csv(path, sep=sep, index_col=None)
 
@@ -409,6 +132,7 @@ def read_emg8(
     data_origin[cmd_col] = data_origin[state_col].apply(lambda state: states_ordered[state])
 
     # Далее работаем только с необходимыми столбцами
+    cols = feature_cols + [cmd_col, state_col, ts_col]
     data = data_origin.copy()[cols]
     
     # Добавим признак порядкового номера эпох (требуется для алгоритма разметки)
@@ -429,8 +153,8 @@ def read_emg8(
 
     data = marker.fit_transform(data)
 
-    # Перепишем признак sync_col (порядковый номер жеста в монтаже), 
-    # чтобы он соответствовал разметке по фактическим границам
+    # ПЕРЕПИШЕМ признак sync_col (порядковый номер жеста в монтаже), 
+    # чтобы он соответствовал разметке ПО ФАКТИЧЕСКИМ ГРАНИЦАМ
     bounds = data[data[target_col_name] != data[target_col_name].shift(1)].index
     for i, lr in enumerate(zip(bounds, np.append(bounds[1:], [data.index[-1]]))):
         l, r = lr # l, r - индексы начала текущей и следующей эпох соответственно
@@ -445,10 +169,12 @@ def read_emg8(
         data.loc[l: r - 1, group_col_name] = i
     n_groups = i
 
-
+    # Разделяем признаки и таргет
     X = data[feature_cols].copy()
     y = data[target_col_name].copy()
 
+    # Если задано количество циклов (групп) для отложенной выборки, 
+    # разделяем данные на train и test
     if n_holdout_groups > 0:
         if n_holdout_groups >= n_groups:
             raise ValueError(f"Количество отложенных групп n_holdput_groups={n_holdout_groups} должно быть меньше общего количества групп {n_groups + 1}")
@@ -458,16 +184,21 @@ def read_emg8(
         y_train = y.loc[: last_train_idx].to_numpy()
         y_test = y.loc[last_train_idx + 1: ].to_numpy()
         groups = data.loc[: last_train_idx, group_col_name].to_numpy()
-    else:
+    else: # n_holdout_groups == 0
+        # Если не требуется выделять отложенную тестовую группу, 
+        # то в train-выборку вернем все данные
         X_train = X.to_numpy()
-        X_test = None
+        X_test = None 
         y_train = y.to_numpy()
         y_test = None
         groups = data[group_col_name].to_numpy()
 
-    data_origin[target_col_name] = data[target_col_name]
-    data_origin[sync_col_name] = data[sync_col_name]
-    data_origin[group_col_name] = data[group_col_name]
+    # Чтобы вернуть полные исходные данные, 
+    # но с добавлением меток таргета, порядкового номера жеста и номера цикла протокола, 
+    # просто скопируем соответствующие столбцы:
+    data_origin[target_col_name] = data[target_col_name] # таргет
+    data_origin[sync_col_name] = data[sync_col_name]     # порядковый номер жеста
+    data_origin[group_col_name] = data[group_col_name]   # порядковый номер цикла
 
     return X_train, X_test, y_train, y_test, data_origin, groups
 
@@ -726,9 +457,6 @@ class PostprocWrapper(BaseEstimator, TransformerMixin):
 # ПАЙПЛАЙНЫ
 
 MAX_TOTAL_SHIFT = 8
-
-from sklearn.pipeline import Pipeline
-
 
 # Получить суммарный лаг пайплайна (в количестве измерений)
 def get_total_shift(pipeline: Pipeline):
