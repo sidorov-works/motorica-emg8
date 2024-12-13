@@ -208,6 +208,11 @@ class BasePeakMarker(BaseEstimator, TransformerMixin):
             spacing=self.spacing
         )
 
+        # Сохраним найденные пики в соответствующие атрибуты объекта 
+        # (могут пригодиться для последующего анализа результатов разметки)
+        self.peaks_std1 = peaks_std1
+        self.peaks_grad2 = peaks_grad2
+
         peaks = peaks_grad2 if self.use_grad2 else peaks_std1
 
         sync = X[self.sync_col].copy()
@@ -243,7 +248,7 @@ class BasePeakMarker(BaseEstimator, TransformerMixin):
 
         X_mrk.index = origin_index
 
-        return X_mrk, peaks_grad2
+        return X_mrk
 
 
     def fit(self, X: pd.DataFrame, y=None):
@@ -319,9 +324,9 @@ class BasePeakMarker(BaseEstimator, TransformerMixin):
         # Теперь у нас готов список датчиков self.mark_sensors, по которым мы и будем определять границы жестов
 
         # Установим ширину окна (для сглаживания медианой)
-        self.window = self.ticks_per_gest // 3
+        self.window = self.ticks_per_gest // 4
         # и параметр spacing для вычисления градиентов
-        self.spacing = self.ticks_per_gest // 3
+        self.spacing = self.ticks_per_gest // 4
 
         return self
     
@@ -342,12 +347,12 @@ def read_emg8(
         ts_col: str = TS_COL,
         sync_col_name: str = SYNC_COL,
         group_col_name: str = GROUP_COL,
-        n_gests_in_group: int = N_GESTS_IN_CYCLE,
+        # n_gests_in_group: int = N_GESTS_IN_CYCLE,
         states_to_drop: list = [BASELINE_STATE, FINISH_STATE],
         marker = BasePeakMarker(),
         target_col_name: str = TARGET,
         n_holdout_groups: int = 0
-        ) -> List[pd.DataFrame | pd.Series | None]:
+        ) -> List:
     '''
     Осуществляет чтение файла с данными измерений монтажа .emg8.
 
@@ -412,15 +417,17 @@ def read_emg8(
         l, r = lr # l, r - индексы начала текущей и следующей эпох соответственно
         data.loc[l: r - 1, sync_col_name] = i
 
-    # Выполним разметку жестов
-    # marker = BasePeakMarker(
-    #     sync_col=sync_col_name, 
-    #     cmd_col=cmd_col, 
-    #     ts_col=ts_col, 
-    #     omg_cols=feature_cols,
-    #     target_col_name=target_col_name
-    # )
-    data, peaks = marker.fit_transform(data)
+    # Определим кол-во жестов в одном цикле протокола
+    protocol = data[[cmd_col, sync_col_name]].drop_duplicates()[cmd_col]
+    protocol = protocol[protocol != 0].to_numpy()
+    for n in range(1, len(protocol)):
+        sld = sliding_window_view(protocol, n)[::n]
+        # Если все элементы (метки классов) равны 
+        if (sld == sld[0]).all():
+            n_gests_in_group = n * 2 # Умножим на 2, чтобы учесть нейтраальный жест
+            break
+
+    data = marker.fit_transform(data)
 
     # Перепишем признак sync_col (порядковый номер жеста в монтаже), 
     # чтобы он соответствовал разметке по фактическим границам
@@ -462,7 +469,7 @@ def read_emg8(
     data_origin[sync_col_name] = data[sync_col_name]
     data_origin[group_col_name] = data[group_col_name]
 
-    return X_train, X_test, y_train, y_test, data_origin, groups, peaks
+    return X_train, X_test, y_train, y_test, data_origin, groups
 
 
 # ----------------------------------------------------------------------------------------------
