@@ -6,6 +6,7 @@ import pandas as pd
 # ВИЗУАЛИЗАЦИЯ ДАННЫХ
 
 import plotly.express as px
+import plotly.io as pio
 
 
 def fig_montage(
@@ -23,5 +24,7 @@ def fig_montage(
         fig_data[extra_label] = extra_labels[extra_label] * mult_labels
         
     fig = px.line(fig_data, width=width, height=height, title=title)
-    fig.update_traces(line=dict(width=2))
+
+    line_width = 1 if pio.templates.default == 'plotly_dark' else 2
+    fig.update_traces(line=dict(width=line_width))
     return fig

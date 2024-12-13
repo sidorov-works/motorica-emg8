@@ -243,7 +243,7 @@ class BasePeakMarker(BaseEstimator, TransformerMixin):
 
         X_mrk.index = origin_index
 
-        return X_mrk
+        return X_mrk, peaks_grad2
 
 
     def fit(self, X: pd.DataFrame, y=None):
@@ -344,6 +344,7 @@ def read_emg8(
         group_col_name: str = GROUP_COL,
         n_gests_in_group: int = N_GESTS_IN_CYCLE,
         states_to_drop: list = [BASELINE_STATE, FINISH_STATE],
+        marker = BasePeakMarker(),
         target_col_name: str = TARGET,
         n_holdout_groups: int = 0
         ) -> List[pd.DataFrame | pd.Series | None]:
@@ -412,14 +413,14 @@ def read_emg8(
         data.loc[l: r - 1, sync_col_name] = i
 
     # Выполним разметку жестов
-    marker = BasePeakMarker(
-        sync_col=sync_col_name, 
-        cmd_col=cmd_col, 
-        ts_col=ts_col, 
-        omg_cols=feature_cols,
-        target_col_name=target_col_name
-    )
-    data = marker.fit_transform(data)
+    # marker = BasePeakMarker(
+    #     sync_col=sync_col_name, 
+    #     cmd_col=cmd_col, 
+    #     ts_col=ts_col, 
+    #     omg_cols=feature_cols,
+    #     target_col_name=target_col_name
+    # )
+    data, peaks = marker.fit_transform(data)
 
     # Перепишем признак sync_col (порядковый номер жеста в монтаже), 
     # чтобы он соответствовал разметке по фактическим границам
@@ -449,19 +450,19 @@ def read_emg8(
         X_test = X.loc[last_train_idx + 1: , :].to_numpy()
         y_train = y.loc[: last_train_idx].to_numpy()
         y_test = y.loc[last_train_idx + 1: ].to_numpy()
-        train_groups = data.loc[: last_train_idx, group_col_name].to_numpy()
+        groups = data.loc[: last_train_idx, group_col_name].to_numpy()
     else:
         X_train = X.to_numpy()
         X_test = None
         y_train = y.to_numpy()
         y_test = None
-        train_groups = data[group_col_name].to_numpy()
+        groups = data[group_col_name].to_numpy()
 
     data_origin[target_col_name] = data[target_col_name]
     data_origin[sync_col_name] = data[sync_col_name]
     data_origin[group_col_name] = data[group_col_name]
 
-    return X_train, X_test, y_train, y_test, data_origin, train_groups
+    return X_train, X_test, y_train, y_test, data_origin, groups, peaks
 
 
 # ----------------------------------------------------------------------------------------------
@@ -516,11 +517,6 @@ class BaseSlidingProc(BaseEstimator, TransformerMixin):
 
         if self.n_lags < 2:
             return X
-
-        # Если хотят предсказать один пример, 
-        # все равно переводим его в двумерный массив
-        #if X.ndim == 1:
-            #X = X.reshape((1, self.n_ftr))
         
         # Если наш объект получает данные впервые,
         if self.X_que.shape[0] == 0:
@@ -739,8 +735,9 @@ def get_total_shift(pipeline: Pipeline):
 
 # Пайплайн на базе логистической регрессии
 def create_logreg_pipeline( 
-        X, y, groups=None,
-        optimize_and_fit: bool = False,
+        X, y,
+        optimize: bool = False,
+        groups=None,
         max_total_shift: int = MAX_TOTAL_SHIFT,
         n_trials: int = 100
     ):
@@ -748,7 +745,6 @@ def create_logreg_pipeline(
     pl = Pipeline([
         ('fix_1dim_sample', FixOneDimSample()),
         ('noise_reduct', NoiseReduction(3)),
-        #('average_diff', AvgDiff(scaler=RobustScaler())),
         ('add_diff', AddDifference(5)),
         ('scaler', MinMaxScaler()),
         ('model', PostprocWrapper(estimator=LogisticRegression(C=10, max_iter=5000)))
@@ -758,8 +754,6 @@ def create_logreg_pipeline(
 
         params = {
             'noise_reduct__n_lags': trial.suggest_int('noise_reduct__n_lags', 1, 7),
-
-            #'average_diff__avg':        trial.suggest_categorical('average_diff__avg', ['mean', 'median']),
 
             'add_diff__n_lags':     trial.suggest_int('add_diff__n_lags', 2, 7),
             'add_diff__avg':        trial.suggest_categorical('add_diff__avg', ['mean', 'median']),
@@ -778,31 +772,24 @@ def create_logreg_pipeline(
             total_shift = min(total_shift, max_total_shift)
             y_shifted = np.hstack((np.tile(y[0], total_shift), y[: -total_shift]))
 
-        # Если переданы группы, то будем проводить кросс-валидацию 
-        # с помощью StratifiedGroupKFold
-        if not groups is None:
-            n_groups = int(np.max(groups) + 1)
-            kf = StratifiedGroupKFold(n_groups)
-            scores = []
-            for index_train, index_valid in kf.split(X, y, groups=groups):
-                X_train = X[index_train]
-                y_train = y_shifted[index_train]
-                X_valid = X[index_valid]
-                y_valid = y_shifted[index_valid]
-                pl.fit(X_train, y_train)
-                y_pred = pl.predict(X_valid)
-                scores.append(f1_score(y_valid, y_pred, average='macro'))
-            return np.mean(scores)
-        # Если же группы не переданы, то используем 
-        # обычную кроссвалидацию без перемешивания
-        else: # (groups is None)
-            return cross_val_score(pl, X, y_shifted, scoring='f1_macro').mean()
-
+        n_groups = int(np.max(groups) + 1)
+        kf = StratifiedGroupKFold(n_groups)
+        scores = []
+        for index_train, index_valid in kf.split(X, y, groups=groups):
+            X_train = X[index_train]
+            y_train = y_shifted[index_train]
+            X_valid = X[index_valid]
+            y_valid = y_shifted[index_valid]
+            pl.fit(X_train, y_train)
+            y_pred = pl.predict(X_valid)
+            scores.append(f1_score(y_valid, y_pred, average='macro'))
+        return np.mean(scores)
     
-    if optimize_and_fit:
+    if optimize:
         study = optuna.create_study(direction='maximize')
         study.optimize(opt_func, n_trials=n_trials, show_progress_bar=True)
         pl.set_params(**study.best_params)
+        
     pl.fit(X, y)
     
     return pl
