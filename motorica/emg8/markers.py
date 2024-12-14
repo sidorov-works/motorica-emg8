@@ -13,7 +13,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 import os
 
 # Для аннотаций
-from typing import List, Any
+from typing import List, Any, Literal
 
 from motorica.emg8.constants import *
 
@@ -84,7 +84,7 @@ class BasePeakMarker(BaseEstimator, TransformerMixin):
             sync_shift: int = 0,
             bounds_shift_extra: int = 0,
             clean_w: int = 5,
-            use_grad2: bool = True
+            use_peaks: Literal['grad', 'std'] = 'grad'
         ):
         self.sync_col = sync_col
         self.cmd_col = cmd_col
@@ -97,17 +97,24 @@ class BasePeakMarker(BaseEstimator, TransformerMixin):
         self.sudden_drop_threshold = sudden_drop_threshold
         self.sync_shift = sync_shift
         self.clean_w = clean_w
-        self.use_grad2 = use_grad2
-        self.bounds_shift = (-2 if self.use_grad2 else 3) + bounds_shift_extra
+        self.use_peaks = use_peaks
+        self.bounds_shift = (-2 if self.use_peaks == 'grad' else 3) + bounds_shift_extra
 
 
-    # Внутренний метод для нахождения "пиков" (второго градиента, градиента станд. отклонения)
     def _find_peaks(
         self,
         X: np.ndarray,
         window: int,
         spacing: int,
     ):
+        """Внутренний метод для нахождения "пиков" второго градиента 
+        и градиента станд. отклонения
+
+        Args:
+            X (np.ndarray): _description_
+            window (int): _description_
+            spacing (int): _description_
+        """
         def _peaks(arr):
             mask = np.hstack([
                 [False],
@@ -158,66 +165,37 @@ class BasePeakMarker(BaseEstimator, TransformerMixin):
         # self.std = std
         # self.std1 = std1
 
-        # Возвращаем пики градиента стандартного отклонения и второго градиента
-        # return _clean_peaks(peaks_std1), _clean_peaks(peaks2)
 
-    # Функция для непосредственной разметки  
+    # Функция для непосредственной разметки. 
+    # Ее можно переопределять в дочерних классах для различной логики разметки
     def _mark(
         self,
         X: pd.DataFrame
     ) -> np.ndarray[int]:
-        
-        # Сохраним исходные индексы и сбросим на время разметки
-        origin_index = X.index
-        X = X.reset_index(drop=True)
-        
-        # Сглаживание
-        X_omg = pd.DataFrame(X[self.mark_sensors]).rolling(self.window, center=True).median()
-        # Приведение к единому масштабу
-        X_omg = MinMaxScaler((1, 1000)).fit_transform(X_omg)
-
-        self._find_peaks(
-            X_omg,
-            window=self.window,
-            spacing=self.spacing
-        )
-
-        peaks = self.peaks_grad2 if self.use_grad2 else self.peaks_std1
-
-        sync = X[self.sync_col].copy()
+    
+        peaks = self.peaks_grad2 if self.use_peaks == 'grad' else self.peaks_std1
        
-        # Сдвигаем синхронизацию
-        if self.sync_shift > 0:
-            sync_0 = sync.iloc[0]
-            sync.iloc[self.sync_shift: ] = sync.iloc[: -self.sync_shift]
-            sync.iloc[: self.sync_shift] = sync_0
-        
         # Искать максимальные пики будем внутри отрезков, 
         # определяемых по признаку синхронизации
-        sync_mask = sync != sync.shift(-1)
-        sync_index = np.append([X.index[0]], X[sync_mask].index)
+        sync_mask = X[self.sync_col] != X[self.sync_col].shift(-1)
+        sync_index = np.append([X.index[0]], X[sync_mask].index, X.index[-1])
 
         labels = [int(X.loc[idx + 1, self.cmd_col]) for idx in sync_index[:-1]]
 
-        bounds = np.array([])
-
+        bounds = np.empty(0, dtype=int)
         for l, r in zip(sync_index, sync_index[1:]):
             bounds = np.append(bounds, np.argmax(peaks[l: r]) + l)
-
         bounds += self.bounds_shift
-
-        X_mrk = X.copy()
+        bounds[bounds < 0] = 0
 
         # Теперь разметим каждое измерение в наборе фактическими метками
-        X_mrk[self.target_col_name] = labels[0]
-        for i, lr in enumerate(zip(bounds, np.append(bounds[1:], X_mrk.index[-1]))):
+        X[self.target_col_name] = labels[0]
+        for i, lr in enumerate(zip(bounds, np.append(bounds[1:], X.index[-1]))):
             l, r = lr
             # l, r - индексы начала текущего и следующего жестов соответственно
-            X_mrk.loc[l: r, self.target_col_name] = labels[i]      
+            X.loc[l: r, self.target_col_name] = labels[i]      
 
-        X_mrk.index = origin_index
-
-        return X_mrk
+        return X
 
 
     def fit(self, X: pd.DataFrame, y=None):
@@ -300,7 +278,89 @@ class BasePeakMarker(BaseEstimator, TransformerMixin):
         return self
     
     def transform(self, X):
-        if self.cmd_col in X.columns:
-            return self._mark(X)
-        else:
-            return X.copy()
+
+        # Сохраним исходные индексы и сбросим на время разметки
+        origin_index = X.index
+        X = X.reset_index(drop=True)
+        
+        # Сглаживание
+        X_omg = pd.DataFrame(X[self.mark_sensors]).rolling(self.window, center=True).median()
+        # Приведение к единому масштабу
+        X_omg = MinMaxScaler((1, 1000)).fit_transform(X_omg)
+
+        # Найдем пики и сохраним в соотв. атрибутах
+        self._find_peaks(
+            X_omg,
+            window=self.window,
+            spacing=self.spacing
+        )
+       
+        # Сдвигаем синхронизацию
+        if self.sync_shift != 0:
+
+            sync = X[self.sync_col].copy()
+
+            if self.sync_shift > 0:   # вперед (вправо)
+                shift = self.sync_shift
+                sync_first = sync.iloc[0]
+                sync.iloc[shift: ] = sync.iloc[: -shift]
+                sync.iloc[: shift] = sync_first
+
+            elif self.sync_shift < 0: # или назад (влево)
+                shift = -self.sync_shift # (минус на минус)
+                sync_last = sync.iloc[-1]
+                sync.iloc[: -shift] = sync.iloc[shift: ]
+                sync.iloc[-shift: ] = sync_last
+
+            X[self.sync_col] = sync
+
+        # Внутренний метод, выполняющий непосредсвтвенную разметку
+        X = self._mark(X)
+
+        # Восстановим оригинальные индексы
+        X.index = origin_index
+
+        return X
+    
+
+
+class TransMarker(BasePeakMarker):
+    
+    def _mark(
+        self,
+        X: pd.DataFrame
+    ) -> np.ndarray[int]:
+        
+        if self.use_peaks == 'grad':
+            peaks = self.peaks_grad2
+            peaks_neg = self.peaks_grad2_neg
+        else: # self.use_peaks == 'std'
+            peaks = self.peaks_std1
+            peaks_neg = self.peaks_std1_neg
+       
+        # Искать границы будем внутри отрезков, 
+        # определяемых по признаку синхронизации
+        sync_mask = X[self.sync_col] != X[self.sync_col].shift(-1)
+        sync_index = np.append([X.index[0]], X[sync_mask].index, X.index[-1])
+
+        labels = [int(X.loc[idx + 1, self.cmd_col]) for idx in sync_index[1:-1:2]]
+
+        X[self.target_col_name] = 0 #X.loc[0, self.cmd_col]
+        # Начинаем цикл поиска с индекса синхронизации 1, пропуская начальный nogo
+        for i, lr in enumerate(zip(sync_index[1::2], sync_index[3::2])):
+            l, r = lr
+            # Находим 2 самых высоких пика за эпоху
+            two_highest = np.sort(np.argpartition(peaks[l: r], -2)[-2:]) + l
+            # Потом находим
+            two_deepest = np.empty(2)
+            # самый глубокий пик между высокими пиками и
+            two_deepest[0] = np.argmin(peaks_neg[two_highest[0]: two_highest[1]]) + two_highest[0]
+            # самый глубокий пик между вторым высоким пиком и концом эпохи :)
+            two_deepest[1] = np.argmin(peaks_neg[two_highest[1]: r]) + two_highest[1]
+
+            # Переход к жесту – метка класса жеста,
+            X.loc[two_highest[0]: two_deepest[0], self.target_col_name] = labels[i]
+            # а переход от жеста к нейтрали – та же метка, но со знаком минус
+            X.loc[two_highest[1]: two_deepest[1], self.target_col_name] = - labels[i]   
+
+        return X

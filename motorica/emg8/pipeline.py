@@ -132,24 +132,26 @@ def read_emg8(
     data_origin[cmd_col] = data_origin[state_col].apply(lambda state: states_ordered[state])
 
     # Далее работаем только с необходимыми столбцами
-    cols = feature_cols + [cmd_col, state_col, ts_col]
-    data = data_origin.copy()[cols]
+    data = data_origin.copy()[feature_cols + [cmd_col, state_col, ts_col]]
     
-    # Добавим признак порядкового номера эпох (требуется для алгоритма разметки)
+    # Добавим признак порядкового номера жеста (требуется для алгоритма разметки)
     bounds = data[data[cmd_col] != data[cmd_col].shift(1)].index
-    for i, lr in enumerate(zip(bounds, np.append(bounds[1:], [data.index[-1]]))):
+    bounds = np.append(bounds, data.index[-1])
+    for i, lr in enumerate(zip(bounds, bounds[1:])):
         l, r = lr # l, r - индексы начала текущей и следующей эпох соответственно
-        data.loc[l: r - 1, sync_col_name] = i
+        # data.loc[l: r - 1, sync_col_name] = i
+        data.loc[l: r, sync_col_name] = i
+    data[sync_col_name] = data[sync_col_name].astype(int)
 
-    # Определим кол-во жестов в одном цикле протокола
-    protocol = data[[cmd_col, sync_col_name]].drop_duplicates()[cmd_col]
-    protocol = protocol[protocol != 0].to_numpy()
-    for n in range(1, len(protocol)):
-        sld = sliding_window_view(protocol, n)[::n]
-        # Если все элементы (метки классов) равны 
-        if (sld == sld[0]).all():
-            n_gests_in_group = n * 2 # Умножим на 2, чтобы учесть нейтраальный жест
-            break
+    # # Определим кол-во жестов в одном цикле протокола
+    # protocol = data[[cmd_col, sync_col_name]].drop_duplicates()[cmd_col]
+    # protocol = protocol[protocol != 0].to_numpy()
+    # for n in range(1, len(protocol)):
+    #     sld = sliding_window_view(protocol, n)[::n]
+    #     # Если все элементы (метки классов) равны 
+    #     if (sld == sld[0]).all():
+    #         n_gests_in_group = n * 2 # Умножим на 2, чтобы учесть нейтраальный жест
+    #         break
 
     data = marker.fit_transform(data)
 
@@ -159,6 +161,16 @@ def read_emg8(
     for i, lr in enumerate(zip(bounds, np.append(bounds[1:], [data.index[-1]]))):
         l, r = lr # l, r - индексы начала текущей и следующей эпох соответственно
         data.loc[l: r - 1, sync_col_name] = i
+
+    # Определим кол-во жестов в одном цикле протокола
+    protocol = data[[target_col_name, sync_col_name]].drop_duplicates()[target_col_name]
+    protocol = protocol[protocol != 0].to_numpy()
+    for n in range(1, len(protocol)):
+        sld = sliding_window_view(protocol, n)[::n]
+        # Если все элементы (метки классов) равны 
+        if (sld == sld[0]).all():
+            n_gests_in_group = n * 2 # Умножим на 2, чтобы учесть нейтральный жест
+            break
 
     # Теперь проставим номера групп (циклов протокола) – понадобится при кросс-валидации
     group_idx = list(data[[target_col_name, sync_col_name]].drop_duplicates().index[::n_gests_in_group])
