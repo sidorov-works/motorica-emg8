@@ -183,7 +183,7 @@ class BasePeakMarker(BaseEstimator, TransformerMixin):
         # Искать максимальные пики будем внутри отрезков, 
         # определяемых по признаку синхронизации
         sync_mask = X[self.sync_col] != X[self.sync_col].shift(-1)
-        sync_index = np.append([X.index[0]], X[sync_mask].index, X.index[-1])
+        sync_index = np.append([X.index[0]], X[sync_mask].index)#, X.index[-1])
 
         labels = [int(X.loc[idx + 1, self.cmd_col]) for idx in sync_index[:-1]]
 
@@ -353,7 +353,7 @@ class TransMarker(BasePeakMarker):
         # Искать границы будем внутри отрезков, 
         # определяемых по признаку синхронизации
         sync_mask = X[self.sync_col] != X[self.sync_col].shift(-1)
-        sync_index = np.append([X.index[0]], X[sync_mask].index, X.index[-1])
+        sync_index = np.append([X.index[0]], X[sync_mask].index)
 
         labels = [int(X.loc[idx + 1, self.cmd_col]) for idx in sync_index[1:-1:2]]
 

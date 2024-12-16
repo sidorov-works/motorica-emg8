@@ -531,71 +531,6 @@ def get_total_shift(pipeline: Pipeline):
             continue
     return total_shift
 
-# Пайплайн на базе логистической регрессии
-def create_logreg_pipeline( 
-        X, y,
-        exec_optimize: bool = False,
-        groups=None,
-        exec_fit: bool = True,
-        max_total_shift: int = MAX_TOTAL_SHIFT,
-        n_trials: int = 100
-    ):
-
-    pl = Pipeline([
-        ('fix_1dim_sample', FixOneDimSample()),
-        ('noise_reduct', NoiseReduction(3)),
-        ('add_diff', AddDifference(5, oper='add')),
-        ('scaler', MinMaxScaler()),
-        # ('model', PostprocWrapper(estimator=LogisticRegression(C=10, max_iter=5000)))
-        ('model', TransWrapper(estimator=LogisticRegression(C=10, max_iter=5000), n_lags=7))
-    ])
-
-
-    def opt_func(trial: optuna.Trial, X=X, y=y, groups=groups, pl=pl, max_total_shift=max_total_shift):
-
-        params = {
-            'noise_reduct__n_lags': trial.suggest_int('noise_reduct__n_lags', 1, 7),
-
-            'add_diff__n_lags':     trial.suggest_int('add_diff__n_lags', 2, 7),
-            'add_diff__avg':        trial.suggest_categorical('add_diff__avg', ['mean', 'median']),
-
-            'model__n_lags':        trial.suggest_int('model__n_lags', 3, 7, step=2),
-
-            'model__C':             trial.suggest_int('model__C', 1, 50, log=True)
-        }
-        pl.set_params(**params)
-
-        total_shift = get_total_shift(pl)
-    
-        if total_shift == 0:
-            y_shifted = y
-        else:
-            total_shift = min(total_shift, max_total_shift)
-            y_shifted = np.hstack((np.tile(y[0], total_shift), y[: -total_shift]))
-
-        n_groups = int(np.max(groups) + 1)
-        kf = StratifiedGroupKFold(n_groups)
-        scores = []
-        for index_train, index_valid in kf.split(X, y, groups=groups):
-            X_train = X[index_train]
-            y_train = y_shifted[index_train]
-            X_valid = X[index_valid]
-            y_valid = y_shifted[index_valid]
-            pl.fit(X_train, y_train)
-            y_pred = pl.predict(X_valid)
-            scores.append(f1_score(y_valid, y_pred, average='macro'))
-        return np.mean(scores)
-    
-    if exec_optimize:
-        study = optuna.create_study(direction='maximize')
-        study.optimize(opt_func, n_trials=n_trials, show_progress_bar=True)
-        pl.set_params(**study.best_params)
-        
-    if exec_fit:
-        pl.fit(X, y)
-    
-    return pl
-
 
 # Пайплайн на базе логистической регрессии
 def create_grad_logreg_pipeline( 
@@ -619,10 +554,9 @@ def create_grad_logreg_pipeline(
     def opt_func(trial: optuna.Trial, X=X, y=y, groups=groups, pl=pl, max_total_shift=max_total_shift):
 
         params = {
-            'noise_reduct__n_lags': trial.suggest_int('noise_reduct__n_lags', 1, 7),
-
+            'noise_reduct__n_lags': trial.suggest_int('noise_reduct__n_lags', 1, 5),
             'model__n_lags':        trial.suggest_int('model__n_lags', 3, 7, step=2),
-
+            'gradients__n_lags':    trial.suggest_int('gradients__n_lags', 2, 5),
             'model__C':             trial.suggest_int('model__C', 1, 50, log=True)
         }
         pl.set_params(**params)
