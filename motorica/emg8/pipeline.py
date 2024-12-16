@@ -454,6 +454,7 @@ class PostprocWrapper(BaseEstimator, TransformerMixin):
     # В дочерних классах данных внутренний метод 
     # должен реализовавыть фактическую постобработку
     def _proc_func(self, yy):
+        yy = np.array(y)
         # В базовой версии возвращаем моду
         mode_res, _ = stats.mode(yy)
         return mode_res
@@ -463,7 +464,7 @@ class PostprocWrapper(BaseEstimator, TransformerMixin):
         y_pred = self.estimator.predict(X)
 
         if self.n_lags < 2:
-            return y_pred
+            return self._proc_func([y_pred])
         
         # Если наш объект-обёртка получает данные впервые,
         if self.y_que.shape[0] == 0:
@@ -507,7 +508,7 @@ class TransWrapper(PostprocWrapper):
     # В дочерних классах данных внутренний метод 
     # должен реализовавыть фактическую постобработку
     def _proc_func(self, yy):
-        yy = yy.copy()
+        yy = np.array(yy)
         yy[yy < 0] = 0
         yy = yy % 10
         # В базовой версии возвращаем моду
@@ -545,10 +546,9 @@ def create_grad_logreg_pipeline(
     pl = Pipeline([
         ('fix_1dim_sample', FixOneDimSample()),
         ('noise_reduct', NoiseReduction(3)),
-        ('gradients', Gradients(3, 'add')),
+        ('gradients', Gradients(4, 'add')),
         ('scaler', MinMaxScaler()),
-        # ('model', PostprocWrapper(estimator=LogisticRegression(C=10, max_iter=5000)))
-        ('model', TransWrapper(estimator=LogisticRegression(C=10, max_iter=5000), n_lags=7))
+        ('model', TransWrapper(estimator=LogisticRegression(C=10, max_iter=5000), n_lags=5))
     ])
 
     def opt_func(trial: optuna.Trial, X=X, y=y, groups=groups, pl=pl, max_total_shift=max_total_shift):
