@@ -410,11 +410,6 @@ class Gradients(BaseSlidingProc):
     def _proc_func(self, X_sld):
         
         X_grad1 = np.gradient(X_sld, self.spacing, axis=1)
-        # X_grad2 = np.gradient(X_grad1, 3, axis=1)
-    
-        # return np.hstack([
-        #     X_grad1.reshape(X_sld.shape[0], -1), X_grad2.reshape(X_sld.shape[0], -1)
-        # ])
 
         return X_grad1.reshape((X_sld.shape[0], -1))
 
@@ -546,7 +541,8 @@ def create_grad_logreg_pipeline(
     pl = Pipeline([
         ('fix_1dim_sample', FixOneDimSample()),
         ('noise_reduct', NoiseReduction(3)),
-        ('gradients', Gradients(4, 'add')),
+        # ('gradients', Gradients(4, 'add')),
+        ('gradients', Gradients(3, 'add')),
         ('scaler', MinMaxScaler()),
         ('model', TransWrapper(estimator=LogisticRegression(C=10, max_iter=5000), n_lags=5))
     ])
