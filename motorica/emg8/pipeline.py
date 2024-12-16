@@ -139,19 +139,8 @@ def read_emg8(
     bounds = np.append(bounds, data.index[-1])
     for i, lr in enumerate(zip(bounds, bounds[1:])):
         l, r = lr # l, r - индексы начала текущей и следующей эпох соответственно
-        # data.loc[l: r - 1, sync_col_name] = i
         data.loc[l: r, sync_col_name] = i
     data[sync_col_name] = data[sync_col_name].astype(int)
-
-    # # Определим кол-во жестов в одном цикле протокола
-    # protocol = data[[cmd_col, sync_col_name]].drop_duplicates()[cmd_col]
-    # protocol = protocol[protocol != 0].to_numpy()
-    # for n in range(1, len(protocol)):
-    #     sld = sliding_window_view(protocol, n)[::n]
-    #     # Если все элементы (метки классов) равны 
-    #     if (sld == sld[0]).all():
-    #         n_gests_in_group = n * 2 # Умножим на 2, чтобы учесть нейтраальный жест
-    #         break
 
     data = marker.fit_transform(data)
 
@@ -164,12 +153,12 @@ def read_emg8(
 
     # Определим кол-во жестов в одном цикле протокола
     protocol = data[[target_col_name, sync_col_name]].drop_duplicates()[target_col_name]
-    protocol = protocol[protocol != 0].to_numpy()
+    #protocol = protocol[protocol != 0].to_numpy()
     for n in range(1, len(protocol)):
         sld = sliding_window_view(protocol, n)[::n]
         # Если все элементы (метки классов) равны 
         if (sld == sld[0]).all():
-            n_gests_in_group = n * 2 # Умножим на 2, чтобы учесть нейтральный жест
+            n_gests_in_group = n #* 2 # Умножим на 2, чтобы учесть нейтральный жест
             break
 
     # Теперь проставим номера групп (циклов протокола) – понадобится при кросс-валидации
@@ -238,7 +227,7 @@ class BaseSlidingProc(BaseEstimator, TransformerMixin):
     def __init__(
             self,
             n_lags: int = 3,
-            oper: str = 'replace' # 'add'
+            oper: Literal['add', 'replace'] = 'replace'
         ):
         self.n_lags = n_lags
         self.oper = oper
@@ -256,7 +245,7 @@ class BaseSlidingProc(BaseEstimator, TransformerMixin):
 
     # В дочерних классах данных внутренний метод 
     # должен реализовавыть фактическую обработку
-    def _proc_func(self, X_sld, X):
+    def _proc_func(self, X_sld):
         # В качестве заглушки просто возвращаем последний (текущий) пример
         return X_sld[:, -1]
     
@@ -278,13 +267,13 @@ class BaseSlidingProc(BaseEstimator, TransformerMixin):
         # Скользящее окно по двумерному массиву признаков 
         X_sld = sliding_window_view(self.X_que, (self.n_lags, self.n_ftr))[:, 0]
 
-        X_proc = self._proc_func(X_sld, X)
+        X_proc = self._proc_func(X_sld)
 
         # В зависимости от значение oper 
         if self.oper == 'add':
             # добавляем новый признак к основному набору
             X_res = np.hstack((X, X_proc))
-        else: # (self.oper == 'replace')
+        else: # self.oper == 'replace'
             # либо заменяем исходные признаки новыми значениями
             X_res = X_proc
 
@@ -311,75 +300,124 @@ class NoiseReduction(BaseSlidingProc):
     def __init__(
             self,
             n_lags: int = 3,
+            oper: Literal['add', 'replace'] = 'replace',
             avg: str = 'median' # 'mean'
         ):
-        super().__init__(n_lags=n_lags, oper='replace')
+        super().__init__(n_lags=n_lags, oper=oper)
         self.avg = avg
 
     def get_realtime_shift(self):
         return self.n_lags // 2
 
-    def _proc_func(self, X_sld, X):
+    def _proc_func(self, X_sld):
         
         np_avg_func = {
             'mean': np.mean,
             'median': np.median
             }[self.avg]
-        X_avg = np_avg_func(X_sld, axis=(1,))
+        X_avg = np_avg_func(X_sld, axis=1)
         
         return X_avg
     
 
 # Обозачение тренда (нахождение разности с предыдущими значениями)
+# class AddDifference(BaseSlidingProc):
+
+#     def __init__(
+#             self,
+#             n_lags: int = 4,
+#             avg: str = 'mean', # 'median'
+#             n_features: int = N_OMG_CH
+#         ):
+#         super().__init__(n_lags=n_lags, oper='add')
+#         self.avg = avg
+#         self.n_features = n_features
+
+
+#     def _proc_func(self, X_sld, X):
+        
+#         np_avg_func = {
+#             'mean': np.mean,
+#             'median': np.median
+#             }[self.avg]
+#         X_prev_avg = np_avg_func(X_sld[:, :-1, :self.n_features], axis=1)
+#         # Результат – разность признаков и их средних предыдущих значений
+#         return X[:, :self.n_features] - X_prev_avg
+    
 class AddDifference(BaseSlidingProc):
 
     def __init__(
             self,
-            n_lags: int = 3,
+            n_lags: int = 4,
+            oper: Literal['add', 'replace'] = 'add',
             avg: str = 'mean', # 'median'
-            n_features: int = N_OMG_CH
+            # n_features: int = N_OMG_CH
         ):
-        super().__init__(n_lags=n_lags, oper='add')
+        super().__init__(n_lags=n_lags, oper=oper)
         self.avg = avg
-        self.n_features = n_features
+        # self.n_features = n_features
 
 
-    def _proc_func(self, X_sld, X):
+    def _proc_func(self, X_sld):
         
         np_avg_func = {
             'mean': np.mean,
             'median': np.median
             }[self.avg]
-        X_prev_avg = np_avg_func(X_sld[:, :-1, :self.n_features], axis=(1,))
+        # X_prev_avg = np_avg_func(X_sld[:, :-1, :self.n_features], axis=1)
+        X_prev_avg = np_avg_func(X_sld[:, :-1], axis=1)
         # Результат – разность признаков и их средних предыдущих значений
-        return X[:, :self.n_features] - X_prev_avg
+        return X_sld[:, -1] - X_prev_avg
     
 
 
-class AvgDiff(BaseEstimator, TransformerMixin):
+# class AvgDiff(BaseEstimator, TransformerMixin):
 
-    def __init__(self, scaler=None, avg='mean'):
-        self.scaler = scaler
-        self.avg = avg
+#     def __init__(self, scaler=None, avg='mean'):
+#         self.scaler = scaler
+#         self.avg = avg
 
 
-    def fit(self, X, y=None):
-        if not self.scaler is None:
-            self.scaler.fit(X)
-        return self
+#     def fit(self, X, y=None):
+#         if not self.scaler is None:
+#             self.scaler.fit(X)
+#         return self
     
     
-    def transform(self, X):
-        if not self.scaler is None:
-            X = self.scaler.transform(X)
-        else:
-            X = np.array(X)
-        np_func = {
-            'mean': np.mean,
-            'median': np.median
-        }[self.avg]
-        X_avg = np_func(X, axis=1).reshape((-1, 1))
-        return np.hstack([X, X - X_avg])
+#     def transform(self, X):
+#         if not self.scaler is None:
+#             X = self.scaler.transform(X)
+#         else:
+#             X = np.array(X)
+#         np_func = {
+#             'mean': np.mean,
+#             'median': np.median
+#         }[self.avg]
+#         X_avg = np_func(X, axis=1).reshape((-1, 1))
+#         return np.hstack([X, X - X_avg])
+    
+class Gradients(BaseSlidingProc):
+
+    def __init__(
+            self,
+            n_lags: int = 3,
+            oper: Literal['add', 'replace'] = 'replace',
+            spacing: int = 3
+        ):
+        super().__init__(n_lags=n_lags, oper=oper)
+        self.spacing = spacing
+
+    def _proc_func(self, X_sld):
+        
+        X_grad1 = np.gradient(X_sld, self.spacing, axis=1)
+        # X_grad2 = np.gradient(X_grad1, 3, axis=1)
+    
+        # return np.hstack([
+        #     X_grad1.reshape(X_sld.shape[0], -1), X_grad2.reshape(X_sld.shape[0], -1)
+        # ])
+
+        return X_grad1.reshape((X_sld.shape[0], -1))
+
     
 
 # ----------------------------------------------------------------------------------------------
@@ -463,12 +501,25 @@ class PostprocWrapper(BaseEstimator, TransformerMixin):
 
         self.estimator.set_params(**params_for_estimator)
         return super().set_params(**params_for_self)
+    
+
+class TransWrapper(PostprocWrapper):
+    # В дочерних классах данных внутренний метод 
+    # должен реализовавыть фактическую постобработку
+    def _proc_func(self, yy):
+        yy = yy.copy()
+        yy[yy < 0] = 0
+        yy = yy % 10
+        # В базовой версии возвращаем моду
+        mode_res, _ = stats.mode(yy)
+        return mode_res
+
 
 
 # ----------------------------------------------------------------------------------------------
 # ПАЙПЛАЙНЫ
 
-MAX_TOTAL_SHIFT = 8
+MAX_TOTAL_SHIFT = 10
 
 # Получить суммарный лаг пайплайна (в количестве измерений)
 def get_total_shift(pipeline: Pipeline):
@@ -483,8 +534,9 @@ def get_total_shift(pipeline: Pipeline):
 # Пайплайн на базе логистической регрессии
 def create_logreg_pipeline( 
         X, y,
-        optimize: bool = False,
+        exec_optimize: bool = False,
         groups=None,
+        exec_fit: bool = True,
         max_total_shift: int = MAX_TOTAL_SHIFT,
         n_trials: int = 100
     ):
@@ -492,10 +544,12 @@ def create_logreg_pipeline(
     pl = Pipeline([
         ('fix_1dim_sample', FixOneDimSample()),
         ('noise_reduct', NoiseReduction(3)),
-        ('add_diff', AddDifference(5)),
+        ('add_diff', AddDifference(5, oper='add')),
         ('scaler', MinMaxScaler()),
-        ('model', PostprocWrapper(estimator=LogisticRegression(C=10, max_iter=5000)))
+        # ('model', PostprocWrapper(estimator=LogisticRegression(C=10, max_iter=5000)))
+        ('model', TransWrapper(estimator=LogisticRegression(C=10, max_iter=5000), n_lags=7))
     ])
+
 
     def opt_func(trial: optuna.Trial, X=X, y=y, groups=groups, pl=pl, max_total_shift=max_total_shift):
 
@@ -532,11 +586,74 @@ def create_logreg_pipeline(
             scores.append(f1_score(y_valid, y_pred, average='macro'))
         return np.mean(scores)
     
-    if optimize:
+    if exec_optimize:
         study = optuna.create_study(direction='maximize')
         study.optimize(opt_func, n_trials=n_trials, show_progress_bar=True)
         pl.set_params(**study.best_params)
         
-    pl.fit(X, y)
+    if exec_fit:
+        pl.fit(X, y)
+    
+    return pl
+
+
+# Пайплайн на базе логистической регрессии
+def create_grad_logreg_pipeline( 
+        X, y,
+        exec_optimize: bool = False,
+        groups=None,
+        exec_fit: bool = True,
+        max_total_shift: int = MAX_TOTAL_SHIFT,
+        n_trials: int = 100
+    ):
+
+    pl = Pipeline([
+        ('fix_1dim_sample', FixOneDimSample()),
+        ('noise_reduct', NoiseReduction(3)),
+        ('gradients', Gradients(3, 'add')),
+        ('scaler', MinMaxScaler()),
+        # ('model', PostprocWrapper(estimator=LogisticRegression(C=10, max_iter=5000)))
+        ('model', TransWrapper(estimator=LogisticRegression(C=10, max_iter=5000), n_lags=7))
+    ])
+
+    def opt_func(trial: optuna.Trial, X=X, y=y, groups=groups, pl=pl, max_total_shift=max_total_shift):
+
+        params = {
+            'noise_reduct__n_lags': trial.suggest_int('noise_reduct__n_lags', 1, 7),
+
+            'model__n_lags':        trial.suggest_int('model__n_lags', 3, 7, step=2),
+
+            'model__C':             trial.suggest_int('model__C', 1, 50, log=True)
+        }
+        pl.set_params(**params)
+
+        total_shift = get_total_shift(pl)
+    
+        if total_shift == 0:
+            y_shifted = y
+        else:
+            total_shift = min(total_shift, max_total_shift)
+            y_shifted = np.hstack((np.tile(y[0], total_shift), y[: -total_shift]))
+
+        n_groups = int(np.max(groups) + 1)
+        kf = StratifiedGroupKFold(n_groups)
+        scores = []
+        for index_train, index_valid in kf.split(X, y, groups=groups):
+            X_train = X[index_train]
+            y_train = y_shifted[index_train]
+            X_valid = X[index_valid]
+            y_valid = y_shifted[index_valid]
+            pl.fit(X_train, y_train)
+            y_pred = pl.predict(X_valid)
+            scores.append(f1_score(y_valid, y_pred, average='macro'))
+        return np.mean(scores)
+    
+    if exec_optimize:
+        study = optuna.create_study(direction='maximize')
+        study.optimize(opt_func, n_trials=n_trials, show_progress_bar=True)
+        pl.set_params(**study.best_params)
+
+    if exec_fit:  
+        pl.fit(X, y)
     
     return pl

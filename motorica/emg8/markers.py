@@ -82,7 +82,7 @@ class BasePeakMarker(BaseEstimator, TransformerMixin):
             hi_val_threshold: float = 0.1,
             sudden_drop_threshold: float = 0.1,
             sync_shift: int = 0,
-            bounds_shift_extra: int = 0,
+            bounds_shift: int = -2,
             clean_w: int = 5,
             use_peaks: Literal['grad', 'std'] = 'grad'
         ):
@@ -98,7 +98,8 @@ class BasePeakMarker(BaseEstimator, TransformerMixin):
         self.sync_shift = sync_shift
         self.clean_w = clean_w
         self.use_peaks = use_peaks
-        self.bounds_shift = (-2 if self.use_peaks == 'grad' else 3) + bounds_shift_extra
+        # self.bounds_shift = (-2 if self.use_peaks == 'grad' else 2) + bounds_shift_extra
+        self.bounds_shift = bounds_shift
 
 
     def _find_peaks(
@@ -133,9 +134,13 @@ class BasePeakMarker(BaseEstimator, TransformerMixin):
             # оставим только один - максимальный
             for i in range(peaks.shape[0] - w + 1):
                 slice = peaks[i: i + w]
-                max_peak = np.max(slice)
-                mask = slice != max_peak
-                peaks[i: i + w][mask] = 0
+                max_idx = np.argmax(slice)
+                max_val = slice[max_idx]
+                peaks[i: i + w] = 0
+                peaks[i + max_idx] = max_val
+                # max_peak = np.max(slice)
+                # mask = slice != max_peak
+                # peaks[i: i + w][mask] = 0
             return peaks
 
         # 1) Градиенты векторов показаний датчиков
@@ -156,7 +161,7 @@ class BasePeakMarker(BaseEstimator, TransformerMixin):
 
         std1 = np.gradient(std, 1, axis=0)
         std1 = np.nan_to_num(std1)
-        self.peaks_std1 = _peaks(std1)
+        self.peaks_std1 = _clean_peaks(_peaks(std1))
         self.peaks_std1_neg = -_clean_peaks(_peaks(-std1))
 
         # Cохраним в атрибутах объекта:
@@ -216,7 +221,14 @@ class BasePeakMarker(BaseEstimator, TransformerMixin):
             ((grouped[self.ts_col].first() - grouped[self.ts_col].first().shift(1)) / ts_delta).median() - self.ticks_per_gest
         )
 
-        # 2. Определим датчики с высоким уровнем сигнала
+        # 2. Сохраним отображение отображение state_col на cmd_col
+        state_cmd = X[[self.state_col, self.cmd_col]].drop_duplicates()
+        states = pd.Series(state_cmd[self.cmd_col])
+        states.index = state_cmd[self.state_col]
+        self.states = states
+        
+
+        # 3. Определим датчики с высоким уровнем сигнала
 
         omg_medians = pd.DataFrame(
             MinMaxScaler().fit_transform(pd.DataFrame(X[self.omg_cols].median(axis=0))),
@@ -225,7 +237,7 @@ class BasePeakMarker(BaseEstimator, TransformerMixin):
         self.hi_val_sensors = omg_medians[omg_medians['omg'] > self.hi_val_threshold].index.to_list()
 
 
-        # 3. Исключим датчики с внезапными падениями сигнала 
+        # 4. Исключим датчики с внезапными падениями сигнала 
         # (используем для этого заданный порог отношения первого процентиля к медиане)
 
         # По каждому из активных датчиков посчитаем отношение первого процентиля к медиане 
@@ -238,7 +250,7 @@ class BasePeakMarker(BaseEstimator, TransformerMixin):
         self.mark_sensors = [sensor for sensor in self.hi_val_sensors if sensor not in sudden_drop_sensors]
 
 
-        # 4. Исключим датчики с перегрузкой
+        # 5. Исключим датчики с перегрузкой
 
         # Сколько идущих подряд максимальных значений считать перегрузкой
         in_a_row_threshold = 5
@@ -345,7 +357,8 @@ class TransMarker(BasePeakMarker):
 
         labels = [int(X.loc[idx + 1, self.cmd_col]) for idx in sync_index[1:-1:2]]
 
-        X[self.target_col_name] = 0 #X.loc[0, self.cmd_col]
+        X[self.target_col_name] = self.states[NOGO_STATE]
+
         # Начинаем цикл поиска с индекса синхронизации 1, пропуская начальный nogo
         for i, lr in enumerate(zip(sync_index[1::2], sync_index[3::2])):
             l, r = lr
@@ -360,7 +373,11 @@ class TransMarker(BasePeakMarker):
 
             # Переход к жесту – метка класса жеста,
             X.loc[two_highest[0]: two_deepest[0], self.target_col_name] = labels[i]
+
+            X.loc[two_deepest[0] + 1: two_highest[1] - 1, self.target_col_name] = labels[i] + 10
+
             # а переход от жеста к нейтрали – та же метка, но со знаком минус
-            X.loc[two_highest[1]: two_deepest[1], self.target_col_name] = - labels[i]   
+            X.loc[two_highest[1]: two_deepest[1], self.target_col_name] = - labels[i] 
+  
 
         return X
