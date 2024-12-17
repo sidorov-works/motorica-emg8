@@ -227,7 +227,7 @@ class BaseSlidingProc(BaseEstimator, TransformerMixin):
     def __init__(
             self,
             n_lags: int = 3,
-            oper: Literal['add', 'replace'] = 'replace'
+            oper: Literal['add', 'replace', 'skip'] = 'replace'
         ):
         self.n_lags = n_lags
         self.oper = oper
@@ -254,7 +254,7 @@ class BaseSlidingProc(BaseEstimator, TransformerMixin):
 
         X = np.array(X)
 
-        if self.n_lags < 2:
+        if self.oper == 'skip' or self.n_lags < 2:
             return X
         
         # Если наш объект получает данные впервые,
@@ -285,6 +285,8 @@ class BaseSlidingProc(BaseEstimator, TransformerMixin):
     # Для преобразования обучающей выборки (fit_transform)
     # нам нельзя вносить задержку во временные ряды
     def fit_transform(self, X, y=None):
+        if self.oper == 'skip':
+            return np.array(X)
         self.fit(X)
         X_proc = self.transform(X)
         self.X_que = np.empty((0, self.n_ftr))
@@ -300,7 +302,7 @@ class NoiseReduction(BaseSlidingProc):
     def __init__(
             self,
             n_lags: int = 3,
-            oper: Literal['add', 'replace'] = 'replace',
+            oper: Literal['add', 'replace', 'skip'] = 'replace',
             avg: str = 'median' # 'mean'
         ):
         super().__init__(n_lags=n_lags, oper=oper)
@@ -349,7 +351,7 @@ class AddDifference(BaseSlidingProc):
     def __init__(
             self,
             n_lags: int = 4,
-            oper: Literal['add', 'replace'] = 'add',
+            oper: Literal['add', 'replace', 'skip'] = 'add',
             avg: str = 'mean', # 'median'
             # n_features: int = N_OMG_CH
         ):
@@ -370,32 +372,30 @@ class AddDifference(BaseSlidingProc):
         return X_sld[:, -1] - X_prev_avg
     
 
+class RatioToPrev(BaseSlidingProc):
 
-# class AvgDiff(BaseEstimator, TransformerMixin):
+    def __init__(
+            self,
+            n_lags: int = 4,
+            oper: Literal['add', 'replace', 'skip'] = 'add',
+            avg: str = 'mean', # 'median'
+        ):
+        super().__init__(n_lags=n_lags, oper=oper)
+        self.avg = avg
 
-#     def __init__(self, scaler=None, avg='mean'):
-#         self.scaler = scaler
-#         self.avg = avg
 
+    def _proc_func(self, X_sld):
+        
+        np_avg_func = {
+            'mean': np.mean,
+            'median': np.median
+            }[self.avg]
 
-#     def fit(self, X, y=None):
-#         if not self.scaler is None:
-#             self.scaler.fit(X)
-#         return self
+        X_prev_avg = np_avg_func(X_sld[:, :-1], axis=1)
+        # Результат – отношение текущего значения к среднему n_lags - 1 предыдущих значений
+        return X_sld[:, -1] / X_prev_avg
     
-    
-#     def transform(self, X):
-#         if not self.scaler is None:
-#             X = self.scaler.transform(X)
-#         else:
-#             X = np.array(X)
-#         np_func = {
-#             'mean': np.mean,
-#             'median': np.median
-#         }[self.avg]
-#         X_avg = np_func(X, axis=1).reshape((-1, 1))
-#         return np.hstack([X, X - X_avg])
-    
+
 class Gradients(BaseSlidingProc):
 
     def __init__(
@@ -414,6 +414,7 @@ class Gradients(BaseSlidingProc):
         return X_grad1.reshape((X_sld.shape[0], -1))
 
 
+# Отношение значения датчика к среднему значению датчиков в текущем измерении
 class RatioToMean(BaseEstimator, TransformerMixin):
 
     def __init__(self, oper: Literal['add', 'replace', 'skip'] = 'add'):
@@ -548,6 +549,13 @@ def get_total_shift(pipeline: Pipeline):
         except AttributeError:
             continue
     return total_shift
+
+
+def f1_score_shifted(y_true, y_pred, shift):
+    y_pred[y_pred < 0] = 0
+    y_pred %= 10
+    y_true_shifted = np.hstack((np.tile(y_true[0], shift), y_true[: -shift]))
+    return f1_score(y_true_shifted, y_pred, average='macro')
 
 
 # Пайплайн на базе логистической регрессии
