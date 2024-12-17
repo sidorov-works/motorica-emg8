@@ -413,7 +413,29 @@ class Gradients(BaseSlidingProc):
 
         return X_grad1.reshape((X_sld.shape[0], -1))
 
+
+class RatioToMean(BaseEstimator, TransformerMixin):
+
+    def __init__(self, oper: Literal['add', 'replace', 'skip'] = 'add'):
+        self.oper = oper
+
+
+    def fit(self, X, y=None):
+        return self
     
+    
+    def transform(self, X):
+
+        if self.oper != 'skip':
+            avg = np.mean(X, axis=1).reshape(-1, 1)
+
+            if self.oper == 'add':
+                return np.hstack([X, X / avg])
+            else: #$ self.oper == 'replace'
+                return X / avg
+        else: # self.oper == 'skip'
+            return X
+        
 
 # ----------------------------------------------------------------------------------------------
 # ОБЕРТКА МОДЕЛИ С ПОСТОБРАБОТКОЙ ПРЕДСКАЗАНИЙ
@@ -535,17 +557,20 @@ def create_grad_logreg_pipeline(
         groups=None,
         exec_fit: bool = True,
         max_total_shift: int = MAX_TOTAL_SHIFT,
-        n_trials: int = 100
+        n_trials: int = 100,
+        **params
     ):
 
     pl = Pipeline([
         ('fix_1dim_sample', FixOneDimSample()),
         ('noise_reduct', NoiseReduction(3)),
-        # ('gradients', Gradients(4, 'add')),
-        ('gradients', Gradients(3, 'add')),
+        ('ratio_to_mean', RatioToMean()),
+        ('gradients', Gradients(4, 'add')),
         ('scaler', MinMaxScaler()),
         ('model', TransWrapper(estimator=LogisticRegression(C=10, max_iter=5000), n_lags=5))
     ])
+
+    pl.set_params(**params)
 
     def opt_func(trial: optuna.Trial, X=X, y=y, groups=groups, pl=pl, max_total_shift=max_total_shift):
 
