@@ -6,6 +6,7 @@ import scipy.stats as stats
 
 # Преобразование признаков
 from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler
+from sklearn.preprocessing import PolynomialFeatures
 
 # Пайплайны
 from sklearn.pipeline import Pipeline
@@ -23,11 +24,10 @@ optuna.logging.set_verbosity(optuna.logging.ERROR)
 import os
 
 # Для аннотаций
-from typing import List, Any
+from typing import List, Literal
 
 from motorica.emg8.constants import *
-
-from motorica.emg8.markers import *
+from motorica.emg8.markers import BasePeakMarker, TransMarker
 
 
 # ----------------------------------------------------------------------------------------------
@@ -449,7 +449,7 @@ class PostprocWrapper(BaseEstimator, TransformerMixin):
     # В дочерних классах данных внутренний метод 
     # должен реализовавыть фактическую постобработку
     def _proc_func(self, yy):
-        yy = np.array(y)
+        yy = np.array(yy)
         # В базовой версии возвращаем моду
         mode_res, _ = stats.mode(yy)
         return mode_res
