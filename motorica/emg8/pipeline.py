@@ -290,9 +290,9 @@ class BaseSlidingProc(BaseEstimator, TransformerMixin):
     # Для преобразования обучающей выборки (fit_transform)
     # нам нельзя вносить задержку во временные ряды
     def fit_transform(self, X, y=None):
+        self.fit(X)
         if self.oper == 'skip':
             return np.array(X)
-        self.fit(X)
         X_proc = self.transform(X)
         self.X_que = np.empty((0, self.n_ftr))
         shift = self.get_realtime_shift()
@@ -308,9 +308,10 @@ class NoiseReduction(BaseSlidingProc):
             self,
             n_lags: int = 3,
             oper: Literal['add', 'replace', 'skip'] = 'replace',
-            avg: str = 'median' # 'mean'
+            avg: str = 'median', # 'mean'
+            first_n: int = -1,
         ):
-        super().__init__(n_lags=n_lags, oper=oper)
+        super().__init__(n_lags=n_lags, oper=oper, first_n=first_n)
         self.avg = avg
 
     def get_realtime_shift(self):
@@ -384,9 +385,10 @@ class Gradients(BaseSlidingProc):
             self,
             n_lags: int = 3,
             oper: Literal['add', 'replace', 'skip'] = 'replace',
-            spacing: int = 3
+            spacing: int = 3,
+            first_n: int = -1,
         ):
-        super().__init__(n_lags=n_lags, oper=oper)
+        super().__init__(n_lags=n_lags, oper=oper, first_n=first_n)
         self.spacing = spacing
 
     def _proc_func(self, X_sld):
@@ -399,23 +401,34 @@ class Gradients(BaseSlidingProc):
 # Отношение значения датчика к среднему значению датчиков в текущем измерении
 class RatioToMean(BaseEstimator, TransformerMixin):
 
-    def __init__(self, oper: Literal['add', 'replace', 'skip'] = 'add'):
+    def __init__(
+            self, 
+            oper: Literal['add', 'replace', 'skip'] = 'add',
+            first_n: int = -1,
+        ):
         self.oper = oper
+        self.first_n = first_n
 
 
     def fit(self, X, y=None):
+        self.n_ftr = X.shape[1] if self.first_n < 1 else min(X.shape[1], self.first_n)
         return self
     
     
     def transform(self, X):
 
         if self.oper != 'skip':
-            avg = np.mean(X, axis=1).reshape(-1, 1)
+            X_orgn = np.array(X)
+            X = np.array(X)[:, :self.n_ftr] # !!!
+            avg = np.mean(X[:, ], axis=1).reshape(-1, 1)
+            X_proc = X / avg
 
             if self.oper == 'add':
-                return np.hstack([X, X / avg])
-            else: #$ self.oper == 'replace'
-                return X / avg
+                return np.hstack([X_orgn, X_proc])
+            else: # self.oper == 'replace'
+                X_res = X_orgn
+                X_res[:, :self.n_ftr] = X_proc
+                return X_res
         else: # self.oper == 'skip'
             return X
         
@@ -423,23 +436,34 @@ class RatioToMean(BaseEstimator, TransformerMixin):
 # Разность значения датчика и среднего значения датчиков в текущем измерении
 class DiffWithMean(BaseEstimator, TransformerMixin):
 
-    def __init__(self, oper: Literal['add', 'replace', 'skip'] = 'replace'):
+    def __init__(
+            self, 
+            oper: Literal['add', 'replace', 'skip'] = 'add',
+            first_n: int = -1,
+        ):
         self.oper = oper
+        self.first_n = first_n
 
 
     def fit(self, X, y=None):
+        self.n_ftr = X.shape[1] if self.first_n < 1 else min(X.shape[1], self.first_n)
         return self
     
     
     def transform(self, X):
 
         if self.oper != 'skip':
-            avg = np.mean(X, axis=1).reshape(-1, 1)
+            X_orgn = np.array(X)
+            X = np.array(X)[:, :self.n_ftr] # !!!
+            avg = np.mean(X[:, ], axis=1).reshape(-1, 1)
+            X_proc = X - avg
 
             if self.oper == 'add':
-                return np.hstack([X, X - avg])
-            else: #$ self.oper == 'replace'
-                return X - avg
+                return np.hstack([X_orgn, X_proc])
+            else: # self.oper == 'replace'
+                X_res = X_orgn
+                X_res[:, :self.n_ftr] = X_proc
+                return X_res
         else: # self.oper == 'skip'
             return X
         
@@ -464,6 +488,7 @@ class PostprocWrapper(BaseEstimator, TransformerMixin):
         return self.n_lags - 1
 
     def fit(self, X, y):
+        print(X.shape)
         # Обучаем модель на лаговых признаках. 
         # При этом первые w - 1 примеров исходных данных пропускаются 
         # и в обучении не участвуют 
@@ -577,10 +602,10 @@ def create_grad_logreg_pipeline(
 
     pl = Pipeline([
         ('fix_1dim_sample', FixOneDimSample()),
-        ('noise_reduct', NoiseReduction(3)),
-        ('diff_with_mean', DiffWithMean(3)),
-        ('ratio_to_mean', RatioToMean('replace')),
-        ('gradients', Gradients(4, 'add')),
+        ('noise_reduct', NoiseReduction(n_lags=5)),
+        ('diff_with_mean', DiffWithMean(oper='add', first_n=N_OMG_CH)),
+        ('ratio_to_mean', RatioToMean(oper='add', first_n=N_OMG_CH)),
+        ('gradients', Gradients(n_lags=4, oper='add')),
         ('scaler', MinMaxScaler()),
         ('model', TransWrapper(estimator=LogisticRegression(C=10, max_iter=5000), n_lags=5))
     ])
