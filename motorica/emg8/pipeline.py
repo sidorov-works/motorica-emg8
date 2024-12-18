@@ -488,7 +488,6 @@ class PostprocWrapper(BaseEstimator, TransformerMixin):
         return self.n_lags - 1
 
     def fit(self, X, y):
-        print(X.shape)
         # Обучаем модель на лаговых признаках. 
         # При этом первые w - 1 примеров исходных данных пропускаются 
         # и в обучении не участвуют 
