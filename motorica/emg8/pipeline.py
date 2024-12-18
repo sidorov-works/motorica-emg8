@@ -228,10 +228,11 @@ class BaseSlidingProc(BaseEstimator, TransformerMixin):
             self,
             n_lags: int = 3,
             oper: Literal['add', 'replace', 'skip'] = 'replace',
-            use_n_first: int = -1
+            first_n: int = -1
         ):
         self.n_lags = n_lags
         self.oper = oper
+        self.first_n = first_n
 
     # По умолчанию для всех дочерних классов считаем, 
     # что их работа не вносит задержку при работе в реальном времени.
@@ -239,7 +240,7 @@ class BaseSlidingProc(BaseEstimator, TransformerMixin):
         return 0
 
     def fit(self, X, y=None):
-        self.n_ftr = X.shape[1]
+        self.n_ftr = X.shape[1] if self.first_n < 1 else min(X.shape[1], self.first_n)
         self.X_que = np.empty((0, self.n_ftr))
         return self
     
@@ -253,7 +254,9 @@ class BaseSlidingProc(BaseEstimator, TransformerMixin):
 
     def transform(self, X):
 
-        X = np.array(X)
+        X_orgn = np.array(X)
+
+        X = np.array(X)[:, :self.n_ftr] # !!!
 
         if self.oper == 'skip' or self.n_lags < 2:
             return X
@@ -273,10 +276,11 @@ class BaseSlidingProc(BaseEstimator, TransformerMixin):
         # В зависимости от значение oper 
         if self.oper == 'add':
             # добавляем новый признак к основному набору
-            X_res = np.hstack((X, X_proc))
+            X_res = np.hstack((X_orgn, X_proc))
         else: # self.oper == 'replace'
             # либо заменяем исходные признаки новыми значениями
-            X_res = X_proc
+            X_res = X_orgn
+            X_res[:, :self.n_ftr] = X_proc
 
         # Запомним в нашем объекте лаги только для будущего нового примера
         self.X_que = self.X_que[-self.n_lags + 1: ]
@@ -574,6 +578,7 @@ def create_grad_logreg_pipeline(
     pl = Pipeline([
         ('fix_1dim_sample', FixOneDimSample()),
         ('noise_reduct', NoiseReduction(3)),
+        ('diff_with_mean', DiffWithMean(3)),
         ('ratio_to_mean', RatioToMean('replace')),
         ('gradients', Gradients(4, 'add')),
         ('scaler', MinMaxScaler()),
