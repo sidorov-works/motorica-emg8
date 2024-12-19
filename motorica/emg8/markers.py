@@ -372,9 +372,9 @@ class TransMarker(BasePeakMarker):
             two_deepest[1] = np.argmin(peaks_neg[two_highest[1]: r]) + two_highest[1]
 
             # Переход к жесту – метка класса жеста + 10,
-            X.loc[two_highest[0]: two_deepest[0], self.target_col_name] = labels[i] + 10
+            X.loc[two_highest[0]: two_deepest[0], self.target_col_name] = labels[i] #+ 10
 
-            X.loc[two_deepest[0] + 1: two_highest[1] - 1, self.target_col_name] = labels[i]
+            # X.loc[two_deepest[0] + 1: two_highest[1] - 1, self.target_col_name] = labels[i]
 
             # а переход от жеста к нейтрали – метка, но со знаком минус
             X.loc[two_highest[1]: two_deepest[1], self.target_col_name] = - labels[i]

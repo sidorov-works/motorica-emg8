@@ -279,8 +279,8 @@ class BaseSlidingProc(BaseEstimator, TransformerMixin):
             X_res = np.hstack((X_orgn, X_proc))
         else: # self.oper == 'replace'
             # либо заменяем исходные признаки новыми значениями
-            X_res = X_orgn
-            X_res[:, :self.n_ftr] = X_proc
+            X_res = np.hstack([X_proc, X_orgn[:, self.n_ftr:]])
+            # X_res[:, :self.n_ftr] = X_proc
 
         # Запомним в нашем объекте лаги только для будущего нового примера
         self.X_que = self.X_que[-self.n_lags + 1: ]
@@ -604,9 +604,10 @@ def create_grad_logreg_pipeline(
         ('noise_reduct', NoiseReduction(n_lags=5)),
         ('diff_with_mean', DiffWithMean(oper='add', first_n=N_OMG_CH)),
         ('ratio_to_mean', RatioToMean(oper='add', first_n=N_OMG_CH)),
-        ('gradients', Gradients(n_lags=4, oper='add')),
+        ('gradients', Gradients(n_lags=4, oper='replace')),
         ('scaler', MinMaxScaler()),
-        ('model', TransWrapper(estimator=LogisticRegression(C=10, max_iter=5000), n_lags=5))
+        # ('model', TransWrapper(estimator=LogisticRegression(C=10, max_iter=5000), n_lags=5))
+        ('model', PostprocWrapper(estimator=LogisticRegression(C=10, max_iter=5000), n_lags=5))
     ])
 
     pl.set_params(**params)
