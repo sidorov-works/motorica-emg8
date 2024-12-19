@@ -384,7 +384,7 @@ class Gradients(BaseSlidingProc):
     def __init__(
             self,
             n_lags: int = 3,
-            oper: Literal['add', 'replace', 'skip'] = 'replace',
+            oper: Literal['add', 'replace', 'skip'] = 'add',
             spacing: int = 3,
             first_n: int = -1,
         ):
@@ -476,11 +476,13 @@ class PostprocWrapper(BaseEstimator, TransformerMixin):
     def __init__(
             self,
             estimator = LogisticRegression(C=10, max_iter=5000),
-            n_lags: int = 5
+            n_lags: int = 5,
+            keep_trans: bool = True
         ):
         self.estimator = estimator
         self.n_lags = n_lags
         self.y_que = np.empty((0,))
+        self.keep_trans = keep_trans
 
         self.classes_ = []
 
@@ -503,6 +505,9 @@ class PostprocWrapper(BaseEstimator, TransformerMixin):
     # должен реализовавыть фактическую постобработку
     def _proc_func(self, yy):
         yy = np.array(yy)
+        if not self.keep_trans:
+            yy[yy < 0] = 0
+            yy = yy % 10
         # В базовой версии возвращаем моду
         mode_res, _ = stats.mode(yy)
         return mode_res
@@ -538,7 +543,7 @@ class PostprocWrapper(BaseEstimator, TransformerMixin):
         self.y_que = np.empty(0)
         # Все именованные аргументы (параметры) кроме перечисленных
         # предназначены для оборачиваемой модели
-        wrapper_params = ['n_lags']
+        wrapper_params = ['n_lags', 'keep_trans']
 
         params_for_estimator = dict()
         params_for_self = dict()
@@ -552,16 +557,16 @@ class PostprocWrapper(BaseEstimator, TransformerMixin):
         return super().set_params(**params_for_self)
     
 
-class TransWrapper(PostprocWrapper):
-    # В дочерних классах данных внутренний метод 
-    # должен реализовавыть фактическую постобработку
-    def _proc_func(self, yy):
-        yy = np.array(yy)
-        yy[yy < 0] = 0
-        yy = yy % 10
-        # В базовой версии возвращаем моду
-        mode_res, _ = stats.mode(yy)
-        return mode_res
+# class TransWrapper(PostprocWrapper):
+#     # В дочерних классах данных внутренний метод 
+#     # должен реализовавыть фактическую постобработку
+#     def _proc_func(self, yy):
+#         yy = np.array(yy)
+#         yy[yy < 0] = 0
+#         yy = yy % 10
+#         # В базовой версии возвращаем моду
+#         mode_res, _ = stats.mode(yy)
+#         return mode_res
 
 
 
@@ -588,6 +593,12 @@ def f1_score_shifted(y_true, y_pred, shift):
     return f1_score(y_true_shifted, y_pred, average='macro')
 
 
+def shift_target(y_true, shift):
+    y_true_shifted = np.hstack((np.tile(y_true[0], shift), y_true[: -shift]))
+    return y_true_shifted
+
+
+
 # Пайплайн на базе логистической регрессии
 def create_grad_logreg_pipeline( 
         X, y,
@@ -603,10 +614,9 @@ def create_grad_logreg_pipeline(
         ('fix_1dim_sample', FixOneDimSample()),
         ('noise_reduct', NoiseReduction(n_lags=5)),
         ('diff_with_mean', DiffWithMean(oper='add', first_n=N_OMG_CH)),
-        ('ratio_to_mean', RatioToMean(oper='add', first_n=N_OMG_CH)),
-        ('gradients', Gradients(n_lags=4, oper='replace')),
+        ('ratio_to_mean', RatioToMean(oper='replace', first_n=N_OMG_CH)),
+        ('gradients', Gradients(n_lags=4, oper='add')),
         ('scaler', MinMaxScaler()),
-        # ('model', TransWrapper(estimator=LogisticRegression(C=10, max_iter=5000), n_lags=5))
         ('model', PostprocWrapper(estimator=LogisticRegression(C=10, max_iter=5000), n_lags=5))
     ])
 

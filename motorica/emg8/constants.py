@@ -12,17 +12,19 @@ TS_COL = 'ts'         # столбец метки времени
 
 # Используемые компанией статусы для обозначения команд жестов:
 
-BASELINE_STATE = 'Baseline'     # доп. служебный статус в начале монтажа
-FINISH_STATE   = 'Finish'       # доп. служебный статус в конце монтажа
+BASELINE_STATE = 'Baseline'      # доп. служебный статус в начале монтажа
+FINISH_STATE   = 'Finish'        # доп. служебный статус в конце монтажа
 
-NOGO_STATE = 'Neutral'          # нейтральный жест
-THUMB_STATE = 'ThumbFingers'    #
-CLOSE_STATE = 'Close'           #
-OPEN_STATE = 'Open'             #
-PINCH_STATE = 'Pinch'           #
-INDICATION_STATE = 'Indication' #
-FLEX_STATE = 'Wrist_Flex'       #
-EXTEND_STATE = 'Wrist_Extend'   #
+NOGO_STATE = 'Neutral'           # нейтральный жест
+THUMB_STATE = 'ThumbFingers'     #
+CLOSE_STATE = 'Close'            #
+OPEN_STATE = 'Open'              #
+PINCH_STATE = 'Pinch'            #
+INDICATION_STATE = 'Indication'  #
+FLEX_STATE = 'Wrist_Flex'        #
+EXTEND_STATE = 'Wrist_Extend'    #
+
+STABLE_STATE = 'Stable'
 
 
 # Список с названиями всех столбцов OMG
