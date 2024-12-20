@@ -555,18 +555,6 @@ class PostprocWrapper(BaseEstimator, TransformerMixin):
 
         self.estimator.set_params(**params_for_estimator)
         return super().set_params(**params_for_self)
-    
-
-# class TransWrapper(PostprocWrapper):
-#     # В дочерних классах данных внутренний метод 
-#     # должен реализовавыть фактическую постобработку
-#     def _proc_func(self, yy):
-#         yy = np.array(yy)
-#         yy[yy < 0] = 0
-#         yy = yy % 10
-#         # В базовой версии возвращаем моду
-#         mode_res, _ = stats.mode(yy)
-#         return mode_res
 
 
 
@@ -600,11 +588,11 @@ def shift_target(y_true, shift):
 
 
 # Пайплайн на базе логистической регрессии
-def create_grad_logreg_pipeline( 
-        X, y,
+def create_logreg_pipeline( 
+        X=None, y=None,
         exec_optimize: bool = False,
         groups=None,
-        exec_fit: bool = True,
+        exec_fit: bool = False,
         max_total_shift: int = MAX_TOTAL_SHIFT,
         n_trials: int = 100,
         **params
@@ -612,12 +600,12 @@ def create_grad_logreg_pipeline(
 
     pl = Pipeline([
         ('fix_1dim_sample', FixOneDimSample()),
-        ('noise_reduct', NoiseReduction(n_lags=5)),
+        ('noise_reduct', NoiseReduction(n_lags=3)),
         ('diff_with_mean', DiffWithMean(oper='add', first_n=N_OMG_CH)),
-        ('ratio_to_mean', RatioToMean(oper='replace', first_n=N_OMG_CH)),
-        ('gradients', Gradients(n_lags=4, oper='add')),
+        ('ratio_to_mean', RatioToMean(oper='add', first_n=N_OMG_CH)),
+        ('gradients', Gradients(n_lags=7, oper='add')),
         ('scaler', MinMaxScaler()),
-        ('model', PostprocWrapper(estimator=LogisticRegression(C=10, max_iter=5000), n_lags=5))
+        ('model', PostprocWrapper(estimator=LogisticRegression(C=10, max_iter=5000), n_lags=7))
     ])
 
     pl.set_params(**params)
