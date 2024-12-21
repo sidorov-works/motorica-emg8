@@ -602,6 +602,15 @@ def create_logreg_pipeline(
         **params
     ):
 
+    if not X is None:
+        X = np.array(X)
+
+    if not y is None:
+        y = np.array(y)
+
+    if not groups is None:
+        groups = np.array(groups)
+
     pl = Pipeline([
         ('fix_1dim_sample', FixOneDimSample()),
         ('noise_reduct', NoiseReduction(n_lags=3)),
@@ -617,10 +626,6 @@ def create_logreg_pipeline(
     if exec_optimize:
 
         total_shift = get_total_shift(pl)
-        if total_shift == 0:
-            y_shifted = y
-        else:
-            y_shifted = np.hstack((np.tile(y[0], total_shift), y[: -total_shift]))
 
         n_groups = int(np.max(groups) + 1)
 
@@ -635,9 +640,13 @@ def create_logreg_pipeline(
             scores = []
             for index_train, index_valid in kf.split(X, y, groups=groups):
                 X_train = X[index_train]
-                y_train = y_shifted[index_train]
+                y_train = y[index_train]
                 X_valid = X[index_valid]
-                y_valid = y_shifted[index_valid]
+                y_valid = y[index_valid]
+                if total_shift != 0:
+                    y_valid = np.hstack((np.tile(y_valid[0], total_shift), y_valid[: -total_shift]))
+                y_valid[y_valid < 0] = 0
+                y_valid %= 10
                 pl.fit(X_train, y_train)
                 y_pred = pl.predict(X_valid)
                 scores.append(f1_score(y_valid, y_pred, average='macro'))
