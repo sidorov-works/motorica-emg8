@@ -166,9 +166,9 @@ class BasePeakMarker(BaseEstimator, TransformerMixin):
 
         # Cохраним в атрибутах объекта:
         # self.grad1 = grad1
-        # self.grad2 = grad2
+        self.grad2 = grad2
         # self.std = std
-        # self.std1 = std1
+        self.std1 = std1
 
 
     # Функция для непосредственной разметки. 
@@ -400,9 +400,9 @@ class FullMarker(BasePeakMarker):
             # Потом находим
             two_deepest = np.empty(2)
             # самый глубокий пик между высокими пиками и
-            two_deepest[0] = np.argmin(peaks_neg[two_highest[0]: two_highest[1]]) + two_highest[0]
+            two_deepest[0] = np.argmin(peaks_neg[two_highest[0] + 1: two_highest[1] - 1]) + two_highest[0]
             # самый глубокий пик между вторым высоким пиком и концом эпохи :)
-            two_deepest[1] = np.argmin(peaks_neg[two_highest[1]: r]) + two_highest[1]
+            two_deepest[1] = np.argmin(peaks_neg[two_highest[1] + 1: r]) + two_highest[1]
 
             # Переход к жесту – метка класса жеста + 10,
             X.loc[two_highest[0]: two_deepest[0], self.target_col_name] = labels[i] + 10
@@ -460,9 +460,9 @@ class TransMarker(BasePeakMarker):
             # Потом находим
             two_deepest = np.empty(2)
             # самый глубокий пик между высокими пиками и
-            two_deepest[0] = np.argmin(peaks_neg[two_highest[0]: two_highest[1]]) + two_highest[0]
+            two_deepest[0] = np.argmin(peaks_neg[two_highest[0] + 1: two_highest[1] - 2]) + two_highest[0] # !!!!! -2
             # самый глубокий пик между вторым высоким пиком и концом эпохи :)
-            two_deepest[1] = np.argmin(peaks_neg[two_highest[1]: r]) + two_highest[1]
+            two_deepest[1] = np.argmin(peaks_neg[two_highest[1] + 1: r]) + two_highest[1]
 
             # Переход к жесту – метка класса жеста + 10,
             X.loc[two_highest[0] - 1: two_deepest[0] + 1, self.target_col_name] = labels[i] + 10

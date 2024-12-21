@@ -204,6 +204,8 @@ def read_emg8(
     return X_train, X_test, y_train, y_test, data_origin, groups
 
 
+
+
 # ----------------------------------------------------------------------------------------------
 # ПРЕОБРАЗОВАНИЕ И СОЗДАНИЕ ПРИЗНАКОВ
 
@@ -477,12 +479,12 @@ class PostprocWrapper(BaseEstimator, TransformerMixin):
             self,
             estimator = LogisticRegression(C=10, max_iter=5000),
             n_lags: int = 5,
-            keep_trans: bool = True
+            use_trans: Literal['ignore', 'drop', 'keep'] = 'drop'
         ):
         self.estimator = estimator
         self.n_lags = n_lags
         self.y_que = np.empty((0,))
-        self.keep_trans = keep_trans
+        self.use_trans = use_trans
 
         self.classes_ = []
 
@@ -490,9 +492,11 @@ class PostprocWrapper(BaseEstimator, TransformerMixin):
         return self.n_lags - 1
 
     def fit(self, X, y):
-        # Обучаем модель на лаговых признаках. 
-        # При этом первые w - 1 примеров исходных данных пропускаются 
-        # и в обучении не участвуют 
+
+        if self.use_trans == 'ignore':
+            y[y < 0] = 0
+            y %= 10
+
         self.estimator.fit(X, y)
         # Скопируем атрибут модели .classes_ в соответсвутующий атрибут обёртки
         try:
@@ -505,7 +509,7 @@ class PostprocWrapper(BaseEstimator, TransformerMixin):
     # должен реализовавыть фактическую постобработку
     def _proc_func(self, yy):
         yy = np.array(yy)
-        if not self.keep_trans:
+        if self.use_trans == 'drop':
             yy[yy < 0] = 0
             yy = yy % 10
         # В базовой версии возвращаем моду
@@ -543,7 +547,7 @@ class PostprocWrapper(BaseEstimator, TransformerMixin):
         self.y_que = np.empty(0)
         # Все именованные аргументы (параметры) кроме перечисленных
         # предназначены для оборачиваемой модели
-        wrapper_params = ['n_lags', 'keep_trans']
+        wrapper_params = ['n_lags', 'use_trans']
 
         params_for_estimator = dict()
         params_for_self = dict()
@@ -593,8 +597,8 @@ def create_logreg_pipeline(
         exec_optimize: bool = False,
         groups=None,
         exec_fit: bool = False,
-        max_total_shift: int = MAX_TOTAL_SHIFT,
-        n_trials: int = 100,
+        # max_total_shift: int = MAX_TOTAL_SHIFT,
+        # n_trials: int = 100,
         **params
     ):
 
@@ -610,43 +614,77 @@ def create_logreg_pipeline(
 
     pl.set_params(**params)
 
-    def opt_func(trial: optuna.Trial, X=X, y=y, groups=groups, pl=pl, max_total_shift=max_total_shift):
-
-        params = {
-            'noise_reduct__n_lags': trial.suggest_int('noise_reduct__n_lags', 1, 5),
-            'model__n_lags':        trial.suggest_int('model__n_lags', 3, 7, step=2),
-            'gradients__n_lags':    trial.suggest_int('gradients__n_lags', 2, 5),
-            'model__C':             trial.suggest_int('model__C', 1, 50, log=True)
-        }
-        pl.set_params(**params)
+    if exec_optimize:
 
         total_shift = get_total_shift(pl)
-    
         if total_shift == 0:
             y_shifted = y
         else:
-            total_shift = min(total_shift, max_total_shift)
             y_shifted = np.hstack((np.tile(y[0], total_shift), y[: -total_shift]))
 
         n_groups = int(np.max(groups) + 1)
+
         kf = StratifiedGroupKFold(n_groups)
-        scores = []
-        for index_train, index_valid in kf.split(X, y, groups=groups):
-            X_train = X[index_train]
-            y_train = y_shifted[index_train]
-            X_valid = X[index_valid]
-            y_valid = y_shifted[index_valid]
-            pl.fit(X_train, y_train)
-            y_pred = pl.predict(X_valid)
-            scores.append(f1_score(y_valid, y_pred, average='macro'))
-        return np.mean(scores)
+
+        mean_scores = []
+
+        for use_trans in ['drop', 'ignore']:
+
+            pl.set_params(model__use_trans=use_trans)
+
+            scores = []
+            for index_train, index_valid in kf.split(X, y, groups=groups):
+                X_train = X[index_train]
+                y_train = y_shifted[index_train]
+                X_valid = X[index_valid]
+                y_valid = y_shifted[index_valid]
+                pl.fit(X_train, y_train)
+                y_pred = pl.predict(X_valid)
+                scores.append(f1_score(y_valid, y_pred, average='macro'))
+            mean_scores.append(np.mean(scores))
+
+        pl.set_params(model__use_trans = ['drop', 'ignore'][mean_scores[0] > mean_scores[1]] )
+
+
+
+
+    # def opt_func(trial: optuna.Trial, X=X, y=y, groups=groups, pl=pl, max_total_shift=max_total_shift):
+
+    #     params = {
+    #         'noise_reduct__n_lags': trial.suggest_int('noise_reduct__n_lags', 1, 5),
+    #         'model__n_lags':        trial.suggest_int('model__n_lags', 3, 7, step=2),
+    #         'gradients__n_lags':    trial.suggest_int('gradients__n_lags', 2, 5),
+    #         'model__C':             trial.suggest_int('model__C', 1, 50, log=True)
+    #     }
+    #     pl.set_params(**params)
+
+    #     total_shift = get_total_shift(pl)
     
-    if exec_optimize:
-        study = optuna.create_study(direction='maximize')
-        study.optimize(opt_func, n_trials=n_trials, show_progress_bar=True)
-        pl.set_params(**study.best_params)
+    #     if total_shift == 0:
+    #         y_shifted = y
+    #     else:
+    #         total_shift = min(total_shift, max_total_shift)
+    #         y_shifted = np.hstack((np.tile(y[0], total_shift), y[: -total_shift]))
+
+    #     n_groups = int(np.max(groups) + 1)
+    #     kf = StratifiedGroupKFold(n_groups)
+    #     scores = []
+    #     for index_train, index_valid in kf.split(X, y, groups=groups):
+    #         X_train = X[index_train]
+    #         y_train = y_shifted[index_train]
+    #         X_valid = X[index_valid]
+    #         y_valid = y_shifted[index_valid]
+    #         pl.fit(X_train, y_train)
+    #         y_pred = pl.predict(X_valid)
+    #         scores.append(f1_score(y_valid, y_pred, average='macro'))
+    #     return np.mean(scores)
+    
+    # if exec_optimize:
+    #     study = optuna.create_study(direction='maximize')
+    #     study.optimize(opt_func, n_trials=n_trials, show_progress_bar=True)
+    #     pl.set_params(**study.best_params)
 
     if exec_fit:  
         pl.fit(X, y)
     
-    return pl
+    return pl, max(mean_scores) if exec_optimize else None
