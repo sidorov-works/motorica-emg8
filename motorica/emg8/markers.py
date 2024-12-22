@@ -82,9 +82,9 @@ class BasePeakMarker(BaseEstimator, TransformerMixin):
             hi_val_threshold: float = 0.1,
             sudden_drop_threshold: float = 0.1,
             sync_shift: int = 0,
-            bounds_shift: int = -2,
+            bounds_shift: int = 0,
             clean_w: int = 5,
-            use_peaks: Literal['grad', 'std'] = 'grad'
+            use_peaks: Literal['grad', 'std'] = 'std'
         ):
         self.sync_col = sync_col
         self.cmd_col = cmd_col

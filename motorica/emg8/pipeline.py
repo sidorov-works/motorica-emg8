@@ -27,7 +27,7 @@ import os
 from typing import List, Literal
 
 from motorica.emg8.constants import *
-from motorica.emg8.markers import BasePeakMarker, TransMarker
+from motorica.emg8.markers import BaseMarker, FullMarker
 
 
 # ----------------------------------------------------------------------------------------------
@@ -70,7 +70,7 @@ def read_emg8(
         sync_col_name: str = SYNC_COL,
         group_col_name: str = GROUP_COL,
         states_to_drop: list = [BASELINE_STATE, FINISH_STATE],
-        marker = BasePeakMarker(),
+        marker = BaseMarker(),
         target_col_name: str = TARGET,
         n_holdout_groups: int = 0
         ) -> List:
@@ -142,7 +142,7 @@ def read_emg8(
         data.loc[l: r, sync_col_name] = i
     data[sync_col_name] = data[sync_col_name].astype(int)
 
-    data = marker.fit_transform(data)
+    data = marker.fit_transform(data) # Размечаем данные на фактические жесты
 
     # ПЕРЕПИШЕМ признак sync_col (порядковый номер жеста в монтаже), 
     # чтобы он соответствовал разметке ПО ФАКТИЧЕСКИМ ГРАНИЦАМ
@@ -201,9 +201,30 @@ def read_emg8(
     data_origin[sync_col_name] = data[sync_col_name]     # порядковый номер жеста
     data_origin[group_col_name] = data[group_col_name]   # порядковый номер цикла
 
-    return X_train, X_test, y_train, y_test, data_origin, groups
+    return X_train, X_test, y_train, y_test, groups, data_origin
 
 
+
+def score_montages(dir: str, ext: str = '.emg8'):
+
+    montages_cv_scores = []
+    full_marker = FullMarker()
+    montages = sorted(filter(lambda f: f.endswith(ext), os.listdir(dir)))
+
+    for montage in montages:
+        
+        *_, gestures_full = read_emg8(montage, dir=dir, marker=full_marker)
+
+        _, cv_score = create_logreg_pipeline(
+            X=gestures_full[OMG_CH], 
+            y=gestures_full[TARGET],
+            exec_optimize=True,
+            groups=gestures_full[GROUP_COL]
+        )
+
+        montages_cv_scores.append(cv_score)
+
+    return pd.Series(montages_cv_scores, index=montages, name='cv score')
 
 
 # ----------------------------------------------------------------------------------------------
