@@ -98,7 +98,6 @@ class BasePeakMarker(BaseEstimator, TransformerMixin):
         self.sync_shift = sync_shift
         self.clean_w = clean_w
         self.use_peaks = use_peaks
-        # self.bounds_shift = (-2 if self.use_peaks == 'grad' else 2) + bounds_shift_extra
         self.bounds_shift = bounds_shift
 
 
@@ -108,14 +107,7 @@ class BasePeakMarker(BaseEstimator, TransformerMixin):
         window: int,
         spacing: int,
     ):
-        """Внутренний метод для нахождения "пиков" второго градиента 
-        и градиента станд. отклонения
 
-        Args:
-            X (np.ndarray): _description_
-            window (int): _description_
-            spacing (int): _description_
-        """
         def _peaks(arr):
             mask = np.hstack([
                 [False],
@@ -344,10 +336,8 @@ class BaseMarker(BasePeakMarker):
         
         if self.use_peaks == 'grad':
             peaks = self.peaks_grad2
-            peaks_neg = self.peaks_grad2_neg
         else: # self.use_peaks == 'std'
             peaks = self.peaks_std1
-            peaks_neg = self.peaks_std1_neg
        
         # Искать границы будем внутри отрезков, 
         # определяемых по признаку синхронизации
@@ -400,7 +390,7 @@ class FullMarker(BasePeakMarker):
             # Потом находим
             two_deepest = np.empty(2)
             # самый глубокий пик между высокими пиками и
-            two_deepest[0] = np.argmin(peaks_neg[two_highest[0] + 1: two_highest[1] - 1]) + two_highest[0]
+            two_deepest[0] = np.argmin(peaks_neg[two_highest[0] + 1: two_highest[1] - 2]) + two_highest[0] # !!!!! -2
             # самый глубокий пик между вторым высоким пиком и концом эпохи :)
             two_deepest[1] = np.argmin(peaks_neg[two_highest[1] + 1: r]) + two_highest[1]
 

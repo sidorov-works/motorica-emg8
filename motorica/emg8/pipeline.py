@@ -31,32 +31,6 @@ from motorica.emg8.markers import BaseMarker, FullMarker
 
 
 # ----------------------------------------------------------------------------------------------
-# ПАРАМЕТРЫ ЧТЕНИЯ ИСХОДНЫХ ДАННЫХ И РАЗМЕТКИ
-
-# DATA_DIR = 'data/new'
-
-# N_OMG_CH = 16         # количество каналов OMG-датчиков
-# OMG_COL_PRFX = 'omg'  # префикс в названиях столбцов датафрейма, соответствующих OMG-датчикам
-# STATE_COL = 'state'   # столбец с названием жеста, соответствующего команде
-# CMD_COL = 'id'        # столбец с меткой команды на выполнение жеста
-# TS_COL = 'ts'         # столбец метки времени
-# N_GESTS_IN_CYCLE = 14 # количество жестов в цикле протокола (включая нейтральные)
-
-# NOGO_STATE = 'Neutral'      # статус, обозначающий нейтральный жест
-# BASELINE_STATE = 'Baseline' # доп. служебный статус в начале монтажа
-# FINISH_STATE   = 'Finish'   # доп. служебный статус в конце монтажа
-
-# # Список с названиями всех столбцов OMG
-# OMG_CH = [OMG_COL_PRFX + str(i) for i in range(N_OMG_CH)]
-
-# # Новые столбцы:
-# SYNC_COL = 'sample'   # порядковый номер размеченного жеста
-# GROUP_COL = 'group'   # новый группы (цикла протокола)
-# TARGET = 'act_label'  # таргет (метка фактически выполняемого жеста)
-
-
-
-# ----------------------------------------------------------------------------------------------
 # ПОДГРУЗКА И РАЗМЕТКА
         
 def read_emg8(
@@ -66,26 +40,30 @@ def read_emg8(
         feature_cols: List[str] = OMG_CH,
         cmd_col: str = CMD_COL,
         state_col: str = STATE_COL,
+        states_to_drop: list = [BASELINE_STATE, FINISH_STATE],
         ts_col: str = TS_COL,
         sync_col_name: str = SYNC_COL,
         group_col_name: str = GROUP_COL,
-        states_to_drop: list = [BASELINE_STATE, FINISH_STATE],
         marker = BaseMarker(),
         target_col_name: str = TARGET,
         n_holdout_groups: int = 0
         ) -> List:
     """
-    Осуществляет чтение файла с данными измерений монтажа .emg8.
+    ### Функцинал
 
-    Перенумеровывает классы жестов в порядке их следования по протоколу монтажа.
+    1. Осуществляет чтение файла с данными измерений .emg8.
+    2. Перенумеровывает классы жестов в порядке их следования в протоколе.
+    3. Добавляет в возвращаемый датафрейм столбцы: 
+       - `sync_col_name` – порядковый номер жеста в монтаже;
+       - `group_col_name` – порядковый номер цикла монтажа;
+       - `target_col_name` - метка класса фактически выполняемого жеста (таргет)
+    4. Разделяет данные на признаки (OMG каналы) и таргет (метка фактического жеста)
+    5. Разделяет данные на тренировочную и тестовую выборки
 
-    Добавляет в возвращаемый датафрейм признак `sync_col_name`, представляющий собой порядковый номер жеста в монтаже.
-
-    Находит циклы протокола и маркирует их признаком `group_col_name`
     ### Параметры
 
     montage : str
-        имя файла для чтения
+        имя файла emg8
 
     dir : str, default="data"
         название папки, в которой находится файл
@@ -97,23 +75,35 @@ def read_emg8(
         список названий столбцов, которые будут использоваться в качестве признаков
 
     cmd_col : str, default=CMD_COL
+        название столбца в исходном файле с идентификатором команды на выполнение жеста
 
-    **ts_col**: *str, default=TS_COL*
+    state_col : str, default=CMD_COL
+        название столбца в исходном файле с текстовой меткой жеста
 
-    **sync_col_name**: *str, default=SYNC_COL*
+    states_to_drop : List[str], default=[BASELINE_STATE, FINISH_STATE]
+        список текстовых меток жестов, которые нужно удалить из исходных данных монтажа
 
-    **drop_baseline_and_finish**: *bool, default=True*<br>
-    Удалять ли в начале и в конце монтажа измерения с метками `Baseline` и `Finish` соответственно
+    ts_col : str, default=TS_COL
+        название столбца в исходном файле с меткой времени
 
-    **mark_up**: *bool, default=True*
+    sync_col_name : str, default=SYNC_COL
+        название нового столбца с порядковым номером жеста в монтаже
 
-    **target_col_name**: *str, default=TARGET*
+    group_col_name : str, default=GROUP_COL
+        название нового столбца с порядковым номером цикла монтажа
 
-    **n_holdput_groups**: *int, default=0*
+    marker : default=FullMarker
+        объект класса-преобразователя, непосредственно осуществляющий разметку
+
+    target_col_name : str, default=TARGET
+        название нового столбца с таргетом
+
+    n_holdput_groups : int, default=0
+        количество последних циклом монтажа, которые становятся тестовой выборкой
 
     ### Возвращаемый результат
 
-    Список: **X_train**, **X_test** | None, **y_train**, **y_train** | None, **data**
+    Список: X_train, X_test | None, y_train, y_train | None, groups, all_data
     """
 
     path = os.path.join(dir, montage)
@@ -206,6 +196,24 @@ def read_emg8(
 
 
 def score_montages(dir: str, ext: str = '.emg8'):
+
+    """
+    ### Функцинал
+
+    С помощью логистической регрессии осуществляет кросс-валидацию для каждого монтажа из заданной папки
+
+    ### Параметры
+
+    dir : str
+        путь к папке с файлами emg8
+
+    ext : str, default=".emg8"
+        расширение файлов с данными (файлы в папке с другими расширениями будут игнорироваться)
+
+    ### Возвращаемый результат
+
+    Серия pandas.Series со средним значением метрики F1-macro для каждого монтажа
+    """
 
     montages_cv_scores = []
     full_marker = FullMarker()
