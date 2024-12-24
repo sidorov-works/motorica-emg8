@@ -194,7 +194,7 @@ def read_emg8(
     return X_train, X_test, y_train, y_test, groups, data_origin
 
 
-
+# Оценка качества размеченных монтажей
 def score_montages(dir: str, ext: str = '.emg8'):
 
     """
@@ -233,6 +233,7 @@ def score_montages(dir: str, ext: str = '.emg8'):
         montages_cv_scores.append(cv_score)
 
     return pd.Series(montages_cv_scores, index=montages, name='cv score')
+
 
 
 # ----------------------------------------------------------------------------------------------
