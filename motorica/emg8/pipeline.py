@@ -361,54 +361,55 @@ class NoiseReduction(BaseSlidingProc):
     
 
 # Обозачение тренда (нахождение разности с предыдущими значениями)
-# class AddDifference(BaseSlidingProc):
+class DiffWithPrev(BaseSlidingProc):
 
-#     def __init__(
-#             self,
-#             n_lags: int = 4,
-#             oper: Literal['add', 'replace', 'skip'] = 'add',
-#             avg: str = 'mean', # 'median'
-#             # n_features: int = N_OMG_CH
-#         ):
-#         super().__init__(n_lags=n_lags, oper=oper)
-#         self.avg = avg
-#         # self.n_features = n_features
+    def __init__(
+            self,
+            n_lags: int = 100,
+            oper: Literal['add', 'replace', 'skip'] = 'add',
+            avg: str = 'mean', # 'median'
+            first_n: int = -1,
+        ):
+        super().__init__(n_lags=n_lags, oper=oper, first_n=first_n)
+        self.avg = avg
+        # self.n_features = n_features
 
 
-#     def _proc_func(self, X_sld):
+    def _proc_func(self, X_sld):
         
-#         np_avg_func = {
-#             'mean': np.mean,
-#             'median': np.median
-#             }[self.avg]
-#         # X_prev_avg = np_avg_func(X_sld[:, :-1, :self.n_features], axis=1)
-#         X_prev_avg = np_avg_func(X_sld[:, :-1], axis=1)
-#         # Результат – разность признаков и их средних предыдущих значений
-#         return X_sld[:, -1] - X_prev_avg
+        np_avg_func = {
+            'mean': np.mean,
+            'median': np.median
+            }[self.avg]
+        # X_prev_avg = np_avg_func(X_sld[:, :-1, :self.n_features], axis=1)
+        X_prev_avg = np_avg_func(X_sld[:, :-1], axis=1)
+        # Результат – разность признаков и их средних предыдущих значений
+        return X_sld[:, -1] - X_prev_avg
     
 
-# class RatioToPrev(BaseSlidingProc):
+class RatioToPrev(BaseSlidingProc):
 
-#     def __init__(
-#             self,
-#             n_lags: int = 4,
-#             oper: Literal['add', 'replace', 'skip'] = 'add',
-#             avg: str = 'mean', # 'median'
-#         ):
-#         super().__init__(n_lags=n_lags, oper=oper)
-#         self.avg = avg
+    def __init__(
+            self,
+            n_lags: int = 100,
+            oper: Literal['add', 'replace', 'skip'] = 'add',
+            avg: str = 'mean', # 'median',
+            first_n: int = -1,
+        ):
+        super().__init__(n_lags=n_lags, oper=oper, first_n=first_n)
+        self.avg = avg
 
 
-#     def _proc_func(self, X_sld):
+    def _proc_func(self, X_sld):
         
-#         np_avg_func = {
-#             'mean': np.mean,
-#             'median': np.median
-#             }[self.avg]
+        np_avg_func = {
+            'mean': np.mean,
+            'median': np.median
+            }[self.avg]
 
-#         X_prev_avg = np_avg_func(X_sld[:, :-1], axis=1)
-#         # Результат – отношение текущего значения к среднему n_lags - 1 предыдущих значений
-#         return X_sld[:, -1] / X_prev_avg
+        X_prev_avg = np_avg_func(X_sld[:, :-1], axis=1)
+        # Результат – отношение текущего значения к среднему n_lags - 1 предыдущих значений
+        return X_sld[:, -1] / X_prev_avg
     
 
 class Gradients(BaseSlidingProc):
@@ -431,73 +432,73 @@ class Gradients(BaseSlidingProc):
 
 
 # Отношение значения датчика к среднему значению датчиков в текущем измерении
-class RatioToMean(BaseEstimator, TransformerMixin):
+# class RatioToMean(BaseEstimator, TransformerMixin):
 
-    def __init__(
-            self, 
-            oper: Literal['add', 'replace', 'skip'] = 'add',
-            first_n: int = -1,
-        ):
-        self.oper = oper
-        self.first_n = first_n
+#     def __init__(
+#             self, 
+#             oper: Literal['add', 'replace', 'skip'] = 'add',
+#             first_n: int = -1,
+#         ):
+#         self.oper = oper
+#         self.first_n = first_n
 
 
-    def fit(self, X, y=None):
-        self.n_ftr = X.shape[1] if self.first_n < 1 else min(X.shape[1], self.first_n)
-        return self
+#     def fit(self, X, y=None):
+#         self.n_ftr = X.shape[1] if self.first_n < 1 else min(X.shape[1], self.first_n)
+#         return self
     
     
-    def transform(self, X):
+#     def transform(self, X):
 
-        if self.oper != 'skip':
-            X_orgn = np.array(X)
-            X = np.array(X)[:, :self.n_ftr] # !!!
-            avg = np.mean(X[:, ], axis=1).reshape(-1, 1)
-            X_proc = X / avg
+#         if self.oper != 'skip':
+#             X_orgn = np.array(X)
+#             X = np.array(X)[:, :self.n_ftr] # !!!
+#             avg = np.mean(X[:, ], axis=1).reshape(-1, 1)
+#             X_proc = X / avg
 
-            if self.oper == 'add':
-                return np.hstack([X_orgn, X_proc])
-            else: # self.oper == 'replace'
-                X_res = X_orgn
-                X_res[:, :self.n_ftr] = X_proc
-                return X_res
-        else: # self.oper == 'skip'
-            return X
+#             if self.oper == 'add':
+#                 return np.hstack([X_orgn, X_proc])
+#             else: # self.oper == 'replace'
+#                 X_res = X_orgn
+#                 X_res[:, :self.n_ftr] = X_proc
+#                 return X_res
+#         else: # self.oper == 'skip'
+#             return X 
         
 
-# Разность значения датчика и среднего значения датчиков в текущем измерении
-class DiffWithMean(BaseEstimator, TransformerMixin):
+# # Разность значения датчика и среднего значения датчиков в текущем измерении
+# class DiffWithMean(BaseEstimator, TransformerMixin):
 
-    def __init__(
-            self, 
-            oper: Literal['add', 'replace', 'skip'] = 'add',
-            first_n: int = -1,
-        ):
-        self.oper = oper
-        self.first_n = first_n
+#     def __init__(
+#             self, 
+#             oper: Literal['add', 'replace', 'skip'] = 'add',
+#             first_n: int = -1,
+#         ):
+#         self.oper = oper
+#         self.first_n = first_n
 
 
-    def fit(self, X, y=None):
-        self.n_ftr = X.shape[1] if self.first_n < 1 else min(X.shape[1], self.first_n)
-        return self
+#     def fit(self, X, y=None):
+#         self.n_ftr = X.shape[1] if self.first_n < 1 else min(X.shape[1], self.first_n)
+#         return self
     
     
-    def transform(self, X):
+#     def transform(self, X):
 
-        if self.oper != 'skip':
-            X_orgn = np.array(X)
-            X = np.array(X)[:, :self.n_ftr] # !!!
-            avg = np.mean(X[:, ], axis=1).reshape(-1, 1)
-            X_proc = X - avg
+#         if self.oper != 'skip':
+#             X_orgn = np.array(X)
+#             X = np.array(X)[:, :self.n_ftr] # !!!
+#             avg = np.mean(X[:, ], axis=1).reshape(-1, 1)
+#             X_proc = X - avg
 
-            if self.oper == 'add':
-                return np.hstack([X_orgn, X_proc])
-            else: # self.oper == 'replace'
-                X_res = X_orgn
-                X_res[:, :self.n_ftr] = X_proc
-                return X_res
-        else: # self.oper == 'skip'
-            return X
+#             if self.oper == 'add':
+#                 return np.hstack([X_orgn, X_proc])
+#             else: # self.oper == 'replace'
+#                 X_res = X_orgn
+#                 X_res[:, :self.n_ftr] = X_proc
+#                 return X_res
+#         else: # self.oper == 'skip'
+#             return X
         
 
 # ----------------------------------------------------------------------------------------------
@@ -644,11 +645,13 @@ def create_logreg_pipeline(
     pl = Pipeline([
         ('fix_1dim_sample', FixOneDimSample()),
         ('noise_reduct', NoiseReduction(n_lags=3)),
-        ('diff_with_mean', DiffWithMean(oper='add', first_n=N_OMG_CH)),
-        ('ratio_to_mean', RatioToMean(oper='add', first_n=N_OMG_CH)),
+        ('ratio_to_prev', RatioToPrev(n_lags=100, oper='add')),
+        ('diff_with_prev', DiffWithPrev(n_lags=100, oper='replace', first_n=N_OMG_CH)),
+        # ('diff_with_mean', DiffWithMean(oper='add', first_n=N_OMG_CH)),
+        # ('ratio_to_mean', RatioToMean(oper='add', first_n=N_OMG_CH)),
         ('gradients', Gradients(n_lags=7, oper='add')),
         ('scaler', MinMaxScaler()),
-        ('model', PostprocWrapper(estimator=LogisticRegression(C=10, max_iter=5000), n_lags=7))
+        ('model', PostprocWrapper(estimator=LogisticRegression(C=10, max_iter=5000), n_lags=9))
     ])
 
     pl.set_params(**params)
