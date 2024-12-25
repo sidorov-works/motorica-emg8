@@ -645,8 +645,8 @@ def create_logreg_pipeline(
     pl = Pipeline([
         ('fix_1dim_sample', FixOneDimSample()),
         ('noise_reduct', NoiseReduction(n_lags=3)),
-        ('ratio_to_prev', RatioToPrev(n_lags=100, oper='add')),
-        ('diff_with_prev', DiffWithPrev(n_lags=100, oper='replace', first_n=N_OMG_CH)),
+        # ('ratio_to_prev', RatioToPrev(n_lags=100, oper='add')),
+        ('diff_with_prev', DiffWithPrev(n_lags=100, oper='replace', avg='median', first_n=N_OMG_CH)),
         # ('diff_with_mean', DiffWithMean(oper='add', first_n=N_OMG_CH)),
         # ('ratio_to_mean', RatioToMean(oper='add', first_n=N_OMG_CH)),
         ('gradients', Gradients(n_lags=7, oper='add')),
