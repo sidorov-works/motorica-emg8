@@ -1,5 +1,8 @@
-##  **Моторика**:<br>распознавание жестов на монтажах *.emg8*
+##  **Система распознавания жестов на основе OMG-данных**
 
-Исходники классов и функций пайплайна представлены в отдельном [модуле](https://github.com/sidorov-works/motorica-emg8/blob/main/motorica/emg8/pipeline.py).
+Классы и функции для работы с пайплайном представлены в отдельном модуле [motorica.emg8.pipeline](https://github.com/sidorov-works/motorica-emg8/blob/main/motorica/emg8/pipeline.py).
 
-Демо-инференс с моделированием работы в реальном времени – в [ноутбуке](https://nbviewer.org/github/sidorov-works/motorica-emg8/blob/main/emg8-demo-inference.ipynb).
+Классы, выполняющие разметку монтажей по фактическому выполнению жестов – в модуле [motorica.emg8.markers](https://github.com/sidorov-works/motorica-emg8/blob/main/motorica/emg8/markers.py)
+
+Демо-инференс: 
+- в [ноутбуке](https://nbviewer.org/github/sidorov-works/motorica-emg8/blob/main/emg8-demo-inference.ipynb).

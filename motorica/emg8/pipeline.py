@@ -365,7 +365,7 @@ class NoiseReduction(BaseSlidingProc):
         return X_avg
     
 
-# Обозачение тренда (нахождение разности с предыдущими значениями)
+# Устранение трендов
 class DiffWithPrev(BaseSlidingProc):
 
     def __init__(
