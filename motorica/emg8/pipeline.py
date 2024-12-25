@@ -219,20 +219,25 @@ def score_montages(dir: str, ext: str = '.emg8'):
     full_marker = FullMarker()
     montages = sorted(filter(lambda f: f.endswith(ext), os.listdir(dir)))
 
+    use_trans = []
+
     for montage in montages:
         
         *_, gestures_full = read_emg8(montage, dir=dir, marker=full_marker)
 
-        _, cv_score = create_logreg_pipeline(
+        model, cv_score = create_logreg_pipeline(
             X=gestures_full[OMG_CH], 
             y=gestures_full[TARGET],
             exec_optimize=True,
             groups=gestures_full[GROUP_COL]
         )
 
+        use_trans.append(model[-1].get_params()['use_trans'])
         montages_cv_scores.append(cv_score)
+    
+    mostly_use_trans = pd.Series(use_trans).mode().values[0]
 
-    return pd.Series(montages_cv_scores, index=montages, name='cv score')
+    return pd.Series(montages_cv_scores, index=montages, name='cv score'), mostly_use_trans
 
 
 
@@ -668,7 +673,7 @@ def create_logreg_pipeline(
         ('noise_reduct', NoiseReduction(n_lags=3)),
         # ('ratio_to_prev', RatioToPrev(n_lags=100, oper='add')),
         ('diff_with_prev', DiffWithPrev(n_lags=100, oper='replace', avg='median', first_n=N_OMG_CH)),
-        ('cut_outliers', CutOutliers(0.95, 0.05)),
+        ('cut_outliers', CutOutliers(0.97, 0.03)),
         # ('diff_with_mean', DiffWithMean(oper='add', first_n=N_OMG_CH)),
         # ('ratio_to_mean', RatioToMean(oper='add', first_n=N_OMG_CH)),
         ('gradients', Gradients(n_lags=7, oper='add')),
@@ -707,7 +712,7 @@ def create_logreg_pipeline(
                 scores.append(f1_score(y_valid, y_pred, average='macro'))
             mean_scores.append(np.mean(scores))
 
-        pl.set_params(model__use_trans = ['drop', 'ignore'][mean_scores[0] > mean_scores[1]] )
+        pl.set_params(model__use_trans = ['drop', 'ignore'][mean_scores[0] < mean_scores[1]] )
 
 
 
