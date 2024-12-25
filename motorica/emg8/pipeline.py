@@ -387,29 +387,50 @@ class DiffWithPrev(BaseSlidingProc):
         return X_sld[:, -1] - X_prev_avg
     
 
-class RatioToPrev(BaseSlidingProc):
+# class RatioToPrev(BaseSlidingProc):
 
-    def __init__(
-            self,
-            n_lags: int = 100,
-            oper: Literal['add', 'replace', 'skip'] = 'add',
-            avg: str = 'mean', # 'median',
-            first_n: int = -1,
-        ):
-        super().__init__(n_lags=n_lags, oper=oper, first_n=first_n)
-        self.avg = avg
+#     def __init__(
+#             self,
+#             n_lags: int = 100,
+#             oper: Literal['add', 'replace', 'skip'] = 'add',
+#             avg: str = 'mean', # 'median',
+#             first_n: int = -1,
+#         ):
+#         super().__init__(n_lags=n_lags, oper=oper, first_n=first_n)
+#         self.avg = avg
 
 
-    def _proc_func(self, X_sld):
+#     def _proc_func(self, X_sld):
         
-        np_avg_func = {
-            'mean': np.mean,
-            'median': np.median
-            }[self.avg]
+#         np_avg_func = {
+#             'mean': np.mean,
+#             'median': np.median
+#             }[self.avg]
 
-        X_prev_avg = np_avg_func(X_sld[:, :-1], axis=1)
-        # Результат – отношение текущего значения к среднему n_lags - 1 предыдущих значений
-        return X_sld[:, -1] / X_prev_avg
+#         X_prev_avg = np_avg_func(X_sld[:, :-1], axis=1)
+#         # Результат – отношение текущего значения к среднему n_lags - 1 предыдущих значений
+#         return X_sld[:, -1] / X_prev_avg
+
+
+class CutOutliers(BaseEstimator, TransformerMixin):
+
+    def __init__(self, up: float = 0.95, lo: float = 0.05):
+        self.lo = lo
+        self.up = up
+
+    def fit(self, X, y=None):
+        self.lo_bounds = np.quantile(X, self.lo, axis=0)
+        self.up_bounds = np.quantile(X, self.up, axis=0)
+        return self
+    
+    def transform(self, X):
+        X = np.array(X)
+        lo_masks = X < self.lo_bounds
+        up_masks = X > self.up_bounds
+        for i in range(X.shape[1]):
+            X[lo_masks[:, i], i] = self.lo_bounds[i]
+            X[up_masks[:, i], i] = self.up_bounds[i]
+        return X
     
 
 class Gradients(BaseSlidingProc):
@@ -647,6 +668,7 @@ def create_logreg_pipeline(
         ('noise_reduct', NoiseReduction(n_lags=3)),
         # ('ratio_to_prev', RatioToPrev(n_lags=100, oper='add')),
         ('diff_with_prev', DiffWithPrev(n_lags=100, oper='replace', avg='median', first_n=N_OMG_CH)),
+        ('cut_outliers', CutOutliers(0.95, 0.05)),
         # ('diff_with_mean', DiffWithMean(oper='add', first_n=N_OMG_CH)),
         # ('ratio_to_mean', RatioToMean(oper='add', first_n=N_OMG_CH)),
         ('gradients', Gradients(n_lags=7, oper='add')),
