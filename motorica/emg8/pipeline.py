@@ -419,7 +419,7 @@ class DiffWithPrev(BaseSlidingProc):
 
 class CutOutliers(BaseEstimator, TransformerMixin):
 
-    def __init__(self, up: float = 0.95, lo: float = 0.05):
+    def __init__(self, up: float = 0.97, lo: float = 0.03):
         self.lo = lo
         self.up = up
 
