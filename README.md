@@ -2,7 +2,12 @@
 
 Классы и функции для работы с пайплайном представлены в отдельном модуле [motorica.emg8.pipeline](https://github.com/sidorov-works/motorica-emg8/blob/main/motorica/emg8/pipeline.py).
 
-Классы, выполняющие разметку монтажей по фактическому выполнению жестов – в модуле [motorica.emg8.markers](https://github.com/sidorov-works/motorica-emg8/blob/main/motorica/emg8/markers.py)
+Классы, выполняющие разметку монтажей по фактическому выполнению жестов – в модуле [motorica.emg8.markers](https://github.com/sidorov-works/motorica-emg8/blob/main/motorica/emg8/markers.py):
+- BaseMarker – по границам начала выполнения жеста, без выделения переходов
+- FullMarker – переходы и жесты (метки от 0 до 7 – жесты, от 11 до 17 – переходы от нейтрали к жесту, от -1 до -7 – переходы от жеста к нейстрали)
+- TransMarker – размечает только переходы
+
+
 
 Краткий демо-инференс (по шаблону заказчика) – в [ноутбуке](https://github.com/sidorov-works/motorica-emg8/blob/main/baseline_logreg_short.ipynb). Более подробный – [тут](https://nbviewer.org/github/sidorov-works/motorica-emg8/blob/main/baseline_logreg_full.ipynb)
 
