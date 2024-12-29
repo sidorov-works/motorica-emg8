@@ -225,7 +225,7 @@ def score_montages(dir: str, ext: str = '.emg8'):
         
         *_, gestures_full = read_emg8(montage, dir=dir, marker=full_marker)
 
-        model, cv_score = create_logreg_pipeline(
+        model, cv_score = create_logreg_pipeline2(
             X=gestures_full[OMG_CH], 
             y=gestures_full[TARGET],
             exec_optimize=True,
@@ -752,6 +752,74 @@ def create_logreg_pipeline(
     #     study = optuna.create_study(direction='maximize')
     #     study.optimize(opt_func, n_trials=n_trials, show_progress_bar=True)
     #     pl.set_params(**study.best_params)
+
+    if exec_fit:  
+        pl.fit(X, y)
+    
+    return pl, max(mean_scores) if exec_optimize else None
+
+# Пайплайн на базе логистической регрессии
+def create_logreg_pipeline2( 
+        X=None, y=None,
+        exec_optimize: bool = False,
+        groups=None,
+        exec_fit: bool = False,
+        # max_total_shift: int = MAX_TOTAL_SHIFT,
+        # n_trials: int = 100,
+        **params
+    ):
+
+    if not X is None:
+        X = np.array(X)
+
+    if not y is None:
+        y = np.array(y)
+
+    if not groups is None:
+        groups = np.array(groups)
+
+    pl = Pipeline([
+        ('fix_1dim_sample', FixOneDimSample()),
+        ('noise_reduct', NoiseReduction(n_lags=3)),
+        ('diff_with_prev', DiffWithPrev(n_lags=100, oper='replace', avg='median', first_n=N_OMG_CH)),
+        ('gradients', Gradients(n_lags=3, oper='add')),
+        ('cut_outliers', CutOutliers(0.97, 0.03)),
+        ('scaler', MinMaxScaler()),
+        ('model', PostprocWrapper(estimator=LogisticRegression(C=2, max_iter=5000), n_lags=9))
+    ])
+
+    pl.set_params(**params)
+
+    if exec_optimize:
+
+        total_shift = get_total_shift(pl)
+
+        n_groups = int(np.max(groups) + 1)
+
+        kf = StratifiedGroupKFold(n_groups)
+
+        mean_scores = []
+
+        for use_trans in ['drop', 'ignore']:
+
+            pl.set_params(model__use_trans=use_trans)
+
+            scores = []
+            for index_train, index_valid in kf.split(X, y, groups=groups):
+                X_train = X[index_train]
+                y_train = y[index_train]
+                X_valid = X[index_valid]
+                y_valid = y[index_valid]
+                if total_shift != 0:
+                    y_valid = np.hstack((np.tile(y_valid[0], total_shift), y_valid[: -total_shift]))
+                y_valid[y_valid < 0] = 0
+                y_valid %= 10
+                pl.fit(X_train, y_train)
+                y_pred = pl.predict(X_valid)
+                scores.append(f1_score(y_valid, y_pred, average='macro'))
+            mean_scores.append(np.mean(scores))
+
+        pl.set_params(model__use_trans = ['drop', 'ignore'][mean_scores[0] < mean_scores[1]] )
 
     if exec_fit:  
         pl.fit(X, y)
