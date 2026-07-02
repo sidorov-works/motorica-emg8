@@ -10,8 +10,6 @@ from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler
 # Пайплайн
 from sklearn.base import BaseEstimator, TransformerMixin
 
-import os
-
 # Для аннотаций
 from typing import List, Any, Literal
 
