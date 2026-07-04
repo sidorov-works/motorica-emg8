@@ -1,8 +1,9 @@
+# shared/emg8/markers.py
+
 # Работа с табличными данными
 import pandas as pd
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
-import scipy.stats as stats
 
 # Преобразование признаков
 from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler
@@ -13,7 +14,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 # Для аннотаций
 from typing import List, Any, Literal
 
-from motorica.emg8.constants import *
+from shared.emg8.config import *
 
 
 class BasePeakMarker(BaseEstimator, TransformerMixin):

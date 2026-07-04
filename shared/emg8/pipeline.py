@@ -1,3 +1,5 @@
+# shared/emg8/pipeline.py
+
 # Работа с табличными данными
 import pandas as pd
 import numpy as np
@@ -26,8 +28,8 @@ import os
 # Для аннотаций
 from typing import List, Literal
 
-from motorica.emg8.constants import *
-from motorica.emg8.markers import BaseMarker, FullMarker
+from shared.emg8.config import *
+from shared.emg8.markers import BaseMarker, FullMarker
 
 
 # ----------------------------------------------------------------------------------------------

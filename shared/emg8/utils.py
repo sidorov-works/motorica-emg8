@@ -1,3 +1,5 @@
+# shared/emg8/utils.py
+
 # Работа с табличными данными
 import pandas as pd
 
@@ -7,7 +9,6 @@ import pandas as pd
 
 import plotly.express as px
 import plotly.io as pio
-
 
 def fig_montage(
         fig_data: pd.DataFrame,
