@@ -14,7 +14,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 # Для аннотаций
 from typing import List, Any, Literal
 
-from shared.emg8.config import *
+from shared.emg8.config import config
 
 
 class BasePeakMarker(BaseEstimator, TransformerMixin):
@@ -71,13 +71,13 @@ class BasePeakMarker(BaseEstimator, TransformerMixin):
 
     def __init__(
             self,
-            sync_col: str = SYNC_COL,
-            cmd_col: str = CMD_COL,
-            state_col: str = STATE_COL,
-            nogo_state: str = NOGO_STATE,
-            ts_col: str = TS_COL,
-            omg_cols: str =  OMG_CH,
-            target_col_name: str = TARGET,
+            sync_col: str = config.SYNC_COL,
+            cmd_col: str = config.CMD_COL,
+            state_col: str = config.STATE_COL,
+            nogo_state: str = config.NOGO_STATE,
+            ts_col: str = config.TS_COL,
+            omg_cols: str =  config.OMG_CH,
+            target_col_name: str = config.TARGET,
             hi_val_threshold: float = 0.1,
             sudden_drop_threshold: float = 0.1,
             sync_shift: int = 0,
@@ -345,7 +345,7 @@ class BaseMarker(BasePeakMarker):
 
         labels = [int(X.loc[idx + 1, self.cmd_col]) for idx in sync_index[1:-1:2]]
 
-        X[self.target_col_name] = self.states[NOGO_STATE]
+        X[self.target_col_name] = self.states[config.NOGO_STATE]
 
         # Начинаем цикл поиска с индекса синхронизации 1, пропуская начальный nogo
         for i, lr in enumerate(zip(sync_index[1::2], sync_index[3::2])):
@@ -379,7 +379,7 @@ class FullMarker(BasePeakMarker):
 
         labels = [int(X.loc[idx + 1, self.cmd_col]) for idx in sync_index[1:-1:2]]
 
-        X[self.target_col_name] = self.states[NOGO_STATE]
+        X[self.target_col_name] = self.states[config.NOGO_STATE]
 
         # Начинаем цикл поиска с индекса синхронизации 1, пропуская начальный nogo
         for i, lr in enumerate(zip(sync_index[1::2], sync_index[3::2])):
@@ -408,8 +408,8 @@ class FullMarker(BasePeakMarker):
 
         super().fit(X)
         # Допишем в атрибут states дополнительные классы
-        stop_states = - self.states[self.states != self.states[NOGO_STATE]]
-        start_states = self.states[self.states != self.states[NOGO_STATE]] + 10
+        stop_states = - self.states[self.states != self.states[config.NOGO_STATE]]
+        start_states = self.states[self.states != self.states[config.NOGO_STATE]] + 10
         stop_states.index = pd.Series(stop_states.index) + '_stop'
         start_states.index = pd.Series(start_states.index) + '_start'
         self.states = pd.concat([self.states, start_states, stop_states], axis=0)
@@ -439,7 +439,7 @@ class TransMarker(BasePeakMarker):
 
         labels = [int(X.loc[idx + 1, self.cmd_col]) for idx in sync_index[1:-1:2]]
 
-        X[self.target_col_name] = self.states[STABLE_STATE]
+        X[self.target_col_name] = self.states[config.STABLE_STATE]
 
         # Начинаем цикл поиска с индекса синхронизации 1, пропуская начальный nogo
         for i, lr in enumerate(zip(sync_index[1::2], sync_index[3::2])):
@@ -467,11 +467,11 @@ class TransMarker(BasePeakMarker):
         super().fit(X)
 
         # Допишем в атрибут states дополнительные классы
-        stop_states = - self.states[self.states != self.states[NOGO_STATE]]
-        start_states = self.states[self.states != self.states[NOGO_STATE]] + 10
+        stop_states = - self.states[self.states != self.states[config.NOGO_STATE]]
+        start_states = self.states[self.states != self.states[config.NOGO_STATE]] + 10
         stop_states.index = pd.Series(stop_states.index) + '_stop'
         start_states.index = pd.Series(start_states.index) + '_start'
-        self.states = pd.concat([pd.Series([0], index=[STABLE_STATE]), start_states, stop_states], axis=0)
+        self.states = pd.concat([pd.Series([0], index=[config.STABLE_STATE]), start_states, stop_states], axis=0)
 
         return self
     

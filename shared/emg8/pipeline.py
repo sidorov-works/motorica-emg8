@@ -28,8 +28,10 @@ import os
 # Для аннотаций
 from typing import List, Literal
 
-from shared.emg8.config import *
+from shared.emg8.config import config
 from shared.emg8.markers import BaseMarker, FullMarker
+
+from pathlib import Path
 
 
 # ----------------------------------------------------------------------------------------------
@@ -37,17 +39,17 @@ from shared.emg8.markers import BaseMarker, FullMarker
         
 def read_emg8(
         montage: str, 
-        dir: str = DATA_DIR, 
+        dir: Path = config.DATA_DIR, 
         sep: str = ' ',
-        feature_cols: List[str] = OMG_CH,
-        cmd_col: str = CMD_COL,
-        state_col: str = STATE_COL,
-        states_to_drop: list = [BASELINE_STATE, FINISH_STATE],
-        ts_col: str = TS_COL,
-        sync_col_name: str = SYNC_COL,
-        group_col_name: str = GROUP_COL,
+        feature_cols: List[str] = config.OMG_CH,
+        cmd_col: str = config.CMD_COL,
+        state_col: str = config.STATE_COL,
+        states_to_drop: list = [config.BASELINE_STATE, config.FINISH_STATE],
+        ts_col: str = config.TS_COL,
+        sync_col_name: str = config.SYNC_COL,
+        group_col_name: str = config.GROUP_COL,
         marker = BaseMarker(),
-        target_col_name: str = TARGET,
+        target_col_name: str = config.TARGET,
         n_holdout_groups: int = 0
         ) -> List:
     """
@@ -228,10 +230,10 @@ def score_montages(dir: str, ext: str = '.emg8'):
         *_, gestures_full = read_emg8(montage, dir=dir, marker=full_marker)
 
         model, cv_score = create_logreg_pipeline(
-            X=gestures_full[OMG_CH], 
-            y=gestures_full[TARGET],
+            X=gestures_full[config.OMG_CH], 
+            y=gestures_full[config.TARGET],
             exec_optimize=True,
-            groups=gestures_full[GROUP_COL]
+            groups=gestures_full[config.GROUP_COL]
         )
 
         use_trans.append(model[-1].get_params()['use_trans'])
@@ -674,7 +676,7 @@ def create_logreg_pipeline(
         ('fix_1dim_sample', FixOneDimSample()),
         ('noise_reduct', NoiseReduction(n_lags=3)),
         # ('ratio_to_prev', RatioToPrev(n_lags=100, oper='add')),
-        ('diff_with_prev', DiffWithPrev(n_lags=100, oper='replace', avg='median', first_n=N_OMG_CH)),
+        ('diff_with_prev', DiffWithPrev(n_lags=100, oper='replace', avg='median', first_n=config.N_OMG_CH)),
         ('cut_outliers', CutOutliers(0.97, 0.03)),
         # ('diff_with_mean', DiffWithMean(oper='add', first_n=N_OMG_CH)),
         # ('ratio_to_mean', RatioToMean(oper='add', first_n=N_OMG_CH)),
