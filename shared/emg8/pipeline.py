@@ -39,7 +39,7 @@ from pathlib import Path
         
 def read_emg8(
         montage: str, 
-        dir: Path = config.DATA_DIR, 
+        dir: Path = config.DATA_ROOT, 
         sep: str = ' ',
         feature_cols: List[str] = config.OMG_CH,
         cmd_col: str = config.CMD_COL,
@@ -336,7 +336,7 @@ class BaseSlidingProc(BaseEstimator, TransformerMixin):
             return np.array(X)
         X_proc = self.transform(X)
         self.X_que = np.empty((0, self.n_ftr))
-        
+
         # Для преобразования обучающей выборки (fit_transform)
         # нам нельзя вносить задержку во временные ряды
         shift = self.get_realtime_shift()
@@ -679,7 +679,7 @@ def create_logreg_pipeline(
         ('fix_1dim_sample', FixOneDimSample()),
         ('noise_reduct', NoiseReduction(n_lags=3)),
         # ('ratio_to_prev', RatioToPrev(n_lags=100, oper='add')),
-        ('diff_with_prev', DiffWithPrev(n_lags=100, oper='replace', avg='median', first_n=config.N_OMG_CH)),
+        ('diff_with_prev', DiffWithPrev(n_lags=100, oper='replace', avg='median', first_n=config.OMG_CH_CNT)),
         ('cut_outliers', CutOutliers(0.97, 0.03)),
         # ('diff_with_mean', DiffWithMean(oper='add', first_n=N_OMG_CH)),
         # ('ratio_to_mean', RatioToMean(oper='add', first_n=N_OMG_CH)),
