@@ -1,17 +1,16 @@
 # shared/emg8/markers.py
 
-# Работа с табличными данными
 import pandas as pd
 import numpy as np
-from numpy.lib.stride_tricks import sliding_window_view
+from numpy.lib.stride_tricks import sliding_window_view # TODO: узнать, как пользоваться этой функцией
 
 # Преобразование признаков
 from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler
 
-# Пайплайн
+# Пайплайн - от этих классов нужно наследовать собственные обработчики 
+# для применения в пайплайне scikit learn
 from sklearn.base import BaseEstimator, TransformerMixin
 
-# Для аннотаций
 from typing import List, Any, Literal
 
 from shared.emg8.config import config

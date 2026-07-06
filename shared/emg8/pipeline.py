@@ -275,9 +275,11 @@ class BaseSlidingProc(BaseEstimator, TransformerMixin):
         self.oper = oper
         self.first_n = first_n
 
-    # По умолчанию для всех дочерних классов считаем, 
-    # что их работа не вносит задержку при работе в реальном времени.
-    def get_realtime_shift(self):
+    def get_realtime_shift(self) -> int:
+        """
+        Возвращает задержку (в шагах), которую вносит преобразователь при работе в реальном времени
+        """
+        # По умтолчанию считаем, что задержка не вносится
         return 0
 
     def fit(self, X, y=None):
@@ -328,14 +330,15 @@ class BaseSlidingProc(BaseEstimator, TransformerMixin):
 
         return X_res
     
-    # Для преобразования обучающей выборки (fit_transform)
-    # нам нельзя вносить задержку во временные ряды
     def fit_transform(self, X, y=None):
         self.fit(X)
         if self.oper == 'skip':
             return np.array(X)
         X_proc = self.transform(X)
         self.X_que = np.empty((0, self.n_ftr))
+        
+        # Для преобразования обучающей выборки (fit_transform)
+        # нам нельзя вносить задержку во временные ряды
         shift = self.get_realtime_shift()
         if shift == 0:
             return X_proc
